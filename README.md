@@ -13,25 +13,42 @@ tables and charts, straight in your terminal — no browser, no app.
   short-range rain chart (see [Nowcast radar](#nowcast-radar) below)
 - **`yr forecast`** — 7-day table, one row per day
 
-## Location
+## Options
 
-No built-in default — pick one:
+### Location
+
+Shared by both commands. No built-in default — pick one:
 
 | Option | Sets | Notes |
 |---|---|---|
 | `--lat`/`--lon` (`--place` optional) | exact coordinates | works offline; always wins over the others |
-| `--location "<name>"` | geocoded coordinates | via [OpenStreetMap Nominatim](https://nominatim.openstreetmap.org/); needs network; ambiguous names (e.g. multiple "Toreplassen" in Norway) list every match instead of guessing -- add a region to disambiguate, e.g. `--location "Toreplassen, Sykkylven"` |
-| `--here` | IP-geolocated coordinates | ⚠️ unreliable, esp. mobile/rural connections |
-| [Settings](#settings) file, `[location]` | your saved default | set once, no flags needed afterward |
+| `--location "<name>"` | geocoded coordinates, for this run only | via [OpenStreetMap Nominatim](https://nominatim.openstreetmap.org/); needs network; ambiguous names (e.g. multiple "Toreplassen" in Norway) list every match instead of guessing -- add a region to disambiguate, e.g. `--location "Toreplassen, Sykkylven"` |
+| `--set-location "<name>"` | geocoded coordinates, and saves it | like `--location`, but also writes the resolved place to the [Settings](#settings) file's `[location]` default -- an ambiguous or failed lookup saves nothing |
+| `--here` | IP-geolocated coordinates | ⚠️ unreliable, esp. mobile/rural connections; never saved -- `--set-location` is the way to set a persistent default |
+| [Settings](#settings) file, `[location]` | your saved default | set once via `--set-location`, no flags needed afterward |
 
-Nothing set → `yr` guesses via IP geolocation for that one run, with a
-loud warning to configure a real default (only errors out if that guess
-also fails — e.g. no network).
+Nothing set → `yr` fails hard with an error (no forecast is shown) — there's
+no silent IP-geolocation guess; pass `--here` explicitly to opt into that.
 
-## Other flags
+### Shared by both commands
 
-- `--no-cache` — bypass the local response cache
-- `--json` — machine-readable output instead of a table/chart
+| Option | Effect |
+|---|---|
+| `--no-cache` | bypass the local response cache for this run -- always fetch live (see [Settings](#settings) to tune per-source caching instead of disabling it outright) |
+| `--json` | machine-readable output instead of a table/chart |
+
+### `yr today` only
+
+| Option | Effect |
+|---|---|
+| `--hours N` | number of hourly rows to show (default: rest of today, min 12 — configurable via `[today].min_hours` in [Settings](#settings)) |
+
+### `yr forecast` only
+
+| Option | Effect |
+|---|---|
+| `--days N` | number of forecast days to show (default: 7) |
+| `--exclude-night` | only use hours 06:00–24:00 for temps/rain/sun |
 
 ## Install
 
@@ -97,11 +114,10 @@ beyond that:
 
 ## Settings
 
-File: `$XDG_CONFIG_HOME/yr-in-the-terminal/config.toml`
-(typically `~/.config/yr-in-the-terminal/config.toml` — the standard
-[XDG Base Directory](https://specifications.freedesktop.org/basedir-spec/latest/)
-location for a Linux app's config).
-
+- **File:** `$XDG_CONFIG_HOME/yr-in-the-terminal/config.toml`
+- **Typically:** `~/.config/yr-in-the-terminal/config.toml` — the standard
+  [XDG Base Directory](https://specifications.freedesktop.org/basedir-spec/latest/)
+  location for a Linux app's config
 - Auto-created, pre-filled, the first time `yr` doesn't find one
 - Plain [TOML](https://toml.io/) — edit values, re-run `yr`
 - Unreadable/invalid file → silently ignored, built-in defaults used, file
@@ -109,19 +125,43 @@ location for a Linux app's config).
 
 ```toml
 [location]
-# lat = 59.9139
-# lon = 10.7522
 # place = "Oslo"
 
 [today]
 min_hours = 12
+
+[cache]
+forecast_ttl = 2700
+nowcast_ttl = 300
+alerts_ttl = 1200
+geocode_ttl = 2592000
 ```
 
-- `[location]` — default coordinates when no `--lat`/`--lon`/`--location`/
-  `--here` flag is given (see [Location](#location)); commented out by
-  default since there's no built-in default
+- `[location]` — default place (geocoded the same way `--location` resolves
+  one) when no `--lat`/`--lon`/`--location`/`--here` flag is given (see
+  [Location](#location)); commented out by default since there's no
+  built-in default. Set it with `yr <command> --set-location "<name>"`
+  rather than by hand
 - `[today].min_hours` — floor for `yr today`'s default row count (`--hours`
   on the command line always overrides it)
+- `[cache]` — see [Caching](#caching) below
+
+### Caching
+
+`yr` caches each API response to disk for a TTL (seconds), so repeated runs
+don't re-fetch data that hasn't changed yet. This exists because
+[yr.no's fair-use terms](https://developer.yr.no/doc/TermsOfService/) ask API
+consumers to cache responses rather than hit the API on every run.
+
+| `[cache]` key | Default | Used by | What it caches |
+|---|---|---|---|
+| `forecast_ttl` | 2700 (45 min) | `yr today` + `yr forecast` | Locationforecast — the hourly model, which itself only updates roughly hourly |
+| `nowcast_ttl` | 300 (5 min) | `yr today` | Nowcast radar — MET issues a new 5-minute radar frame at that same cadence, so this doesn't add staleness beyond the data's own resolution |
+| `alerts_ttl` | 1200 (20 min) | `yr today` | MET weather alerts |
+| `geocode_ttl` | 2592000 (30 days) | `--location` (both commands) | Place-name → coordinates lookups; a place's coordinates don't change |
+
+Set any of them to `0` to always fetch that source live. `--no-cache` on the
+command line disables all caching for one run without editing the file.
 
 ## Development
 

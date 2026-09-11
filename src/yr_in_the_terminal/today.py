@@ -50,10 +50,6 @@ FORECAST_URL = "https://api.met.no/weatherapi/locationforecast/2.0/complete"
 NOWCAST_URL = "https://api.met.no/weatherapi/nowcast/2.0/complete"
 ALERTS_URL = "https://api.met.no/weatherapi/metalerts/2.0/current.json"
 
-FORECAST_TTL = 45 * 60
-NOWCAST_TTL = 5 * 60
-ALERTS_TTL = 20 * 60
-
 TZ = ZoneInfo("Europe/Oslo")
 
 # Precipitation rate (mm/h) at/above which a 5-min nowcast slot counts as "raining".
@@ -146,8 +142,9 @@ def format_latlon(lat: float, lon: float) -> str:
 # ---------------------------------------------------------------------------
 
 
-def build_hourly_rows(lat: float, lon: float, n_hours: int, now: datetime) -> list[dict]:
-    fc = common.fetch_json(FORECAST_URL, {"lat": str(lat), "lon": str(lon)}, ttl=FORECAST_TTL)
+def build_hourly_rows(lat: float, lon: float, n_hours: int, now: datetime, config: dict | None = None) -> list[dict]:
+    ttl = common.cache_ttl(config or {}, "forecast_ttl", common.FORECAST_TTL)
+    fc = common.fetch_json(FORECAST_URL, {"lat": str(lat), "lon": str(lon)}, ttl=ttl)
     ts = fc["properties"]["timeseries"]
     cutoff = now.replace(minute=0, second=0, microsecond=0)
 
@@ -290,9 +287,10 @@ def render_hourly_table(
 # ---------------------------------------------------------------------------
 
 
-def build_nowcast(lat: float, lon: float) -> dict | None:
+def build_nowcast(lat: float, lon: float, config: dict | None = None) -> dict | None:
+    ttl = common.cache_ttl(config or {}, "nowcast_ttl", common.NOWCAST_TTL)
     try:
-        data = common.fetch_json(NOWCAST_URL, {"lat": str(lat), "lon": str(lon)}, ttl=NOWCAST_TTL)
+        data = common.fetch_json(NOWCAST_URL, {"lat": str(lat), "lon": str(lon)}, ttl=ttl)
     except urllib.error.HTTPError as exc:
         if exc.code == 422:
             return None  # outside Nordic radar coverage
@@ -846,9 +844,10 @@ def compute_radar_rain_ranges(
 # ---------------------------------------------------------------------------
 
 
-def build_alerts(lat: float, lon: float) -> list[dict]:
+def build_alerts(lat: float, lon: float, config: dict | None = None) -> list[dict]:
+    ttl = common.cache_ttl(config or {}, "alerts_ttl", common.ALERTS_TTL)
     try:
-        data = common.fetch_json(ALERTS_URL, {"lat": str(lat), "lon": str(lon), "lang": "en"}, ttl=ALERTS_TTL)
+        data = common.fetch_json(ALERTS_URL, {"lat": str(lat), "lon": str(lon), "lang": "en"}, ttl=ttl)
     except (urllib.error.URLError, ValueError, KeyError):
         return []
     return [f["properties"] for f in data.get("features", [])]
@@ -1083,6 +1082,8 @@ def render(
 
     label_w = len("SUN (DAYTIME):") + 1
 
+    console.rule(style="dark_orange")
+
     location = Text()
     location.append("LOCATION:".ljust(label_w), style="dim")
     location.append(place, style="bold green")
@@ -1189,6 +1190,8 @@ def render(
     radar_rain_ranges = compute_radar_rain_ranges(hourly_rows, combined, now)
     render_hourly_table(console, hourly_rows, showers, sun, radar_rain_ranges)
 
+    console.rule(style="dark_orange")
+
 
 def build_json_payload(
     place: str,
@@ -1244,12 +1247,13 @@ def run(args: argparse.Namespace) -> int:
         TZ = common.resolve_tz(args.lat, args.lon)
         now = datetime.now(TZ)
 
-        n_hours = resolve_hours_ahead(args.hours, now, common.load_config(default_toml=common.DEFAULT_CONFIG_TOML))
+        config = common.load_config(default_toml=common.DEFAULT_CONFIG_TOML)
+        n_hours = resolve_hours_ahead(args.hours, now, config)
 
-        nowcast = build_nowcast(args.lat, args.lon)
-        hourly_rows = build_hourly_rows(args.lat, args.lon, n_hours, now)
+        nowcast = build_nowcast(args.lat, args.lon, config)
+        hourly_rows = build_hourly_rows(args.lat, args.lon, n_hours, now, config)
         sun = common.sunrise_sunset(now, args.lat, args.lon, TZ)
-        alerts = build_alerts(args.lat, args.lon)
+        alerts = build_alerts(args.lat, args.lon, config)
     except urllib.error.URLError as exc:
         print(f"error: could not reach yr.no: {exc}", file=sys.stderr)
         return 1

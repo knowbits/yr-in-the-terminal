@@ -22,7 +22,6 @@ from rich.text import Text
 from yr_in_the_terminal import common
 
 FORECAST_URL = "https://api.met.no/weatherapi/locationforecast/2.0/compact"
-FORECAST_TTL = 45 * 60
 
 TZ = ZoneInfo("Europe/Oslo")
 
@@ -194,10 +193,13 @@ def weather(rec: dict, rain_total: float) -> tuple[str, str]:
     return SYMBOLS["cloudy"]
 
 
-def build_rows(lat: float, lon: float, n_days: int, exclude_night: bool = False) -> list[dict]:
+def build_rows(
+    lat: float, lon: float, n_days: int, exclude_night: bool = False, config: dict | None = None
+) -> list[dict]:
     global TZ
     TZ = common.resolve_tz(lat, lon)
-    fc = common.fetch_json(FORECAST_URL, {"lat": str(lat), "lon": str(lon)}, ttl=FORECAST_TTL)
+    ttl = common.cache_ttl(config or {}, "forecast_ttl", common.FORECAST_TTL)
+    fc = common.fetch_json(FORECAST_URL, {"lat": str(lat), "lon": str(lon)}, ttl=ttl)
     precip, cloud, meta = build_hourly(fc["properties"]["timeseries"], TZ, exclude_night)
 
     def in_window(h: int) -> bool:
@@ -310,9 +312,13 @@ def render(rows: list[dict], place: str, exclude_night: bool = False) -> None:
             wind_cell(r),
         )
 
-    header = Text(f"{place} — 7-day forecast (yr.no)", style="bold")
+    header = Text()
+    header.append(place, style="bold green")
+    header.append(" — 7-day forecast (yr.no)", style="bold")
     if exclude_night:
         header.append(" [NIGHT EXCLUDED, 00.00-06.00]", style="bold red")
+
+    console.rule(style="dark_orange")
     console.print(header)
     console.print(table)
     console.print(Text("[avg]: the average day temperature between 10.00 to 18.00", style="bright_black"))
@@ -326,6 +332,7 @@ def render(rows: list[dict], place: str, exclude_night: bool = False) -> None:
         "Sun = daylight hours with cloud cover < "
         f"{common.SUN_CLOUD_PCT}%.[/bright_black]"
     )
+    console.rule(style="dark_orange")
 
 
 def build_json_payload(rows: list[dict], place: str, lat: float, lon: float) -> dict:
@@ -356,7 +363,8 @@ def build_json_payload(rows: list[dict], place: str, lat: float, lon: float) -> 
 
 def run(args: argparse.Namespace) -> int:
     try:
-        rows = build_rows(args.lat, args.lon, args.days, args.exclude_night)
+        config = common.load_config(default_toml=common.DEFAULT_CONFIG_TOML)
+        rows = build_rows(args.lat, args.lon, args.days, args.exclude_night, config)
     except urllib.error.URLError as exc:
         print(f"error: could not reach yr.no: {exc}", file=sys.stderr)
         return 1

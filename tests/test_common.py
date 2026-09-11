@@ -162,5 +162,52 @@ class LoadConfigTest(unittest.TestCase):
         self.assertEqual(common.load_config(self.config_path), {})
 
 
+class SetConfigLocationTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.config_path = Path(self._tmp.name) / "config.toml"
+
+    def test_creates_file_from_default_template_if_missing(self) -> None:
+        common.set_config_location("Oslo", self.config_path)
+        config = common.load_config(self.config_path)
+        self.assertEqual(config["location"]["place"], "Oslo")
+        # The rest of the default template (other sections) still got created.
+        self.assertIn("today", config)
+
+    def test_replaces_commented_out_default(self) -> None:
+        self.config_path.write_text('[location]\n# place = "Oslo"\n\n[today]\nmin_hours = 12\n')
+        common.set_config_location("Bergen, Norway", self.config_path)
+        config = common.load_config(self.config_path)
+        self.assertEqual(config["location"]["place"], "Bergen, Norway")
+        self.assertEqual(config["today"]["min_hours"], 12)
+
+    def test_replaces_legacy_lat_lon_place_trio(self) -> None:
+        self.config_path.write_text('[location]\nlat = 59.9139\nlon = 10.7522\nplace = "Oslo"\n\n[today]\n')
+        common.set_config_location("Bergen, Norway", self.config_path)
+        config = common.load_config(self.config_path)
+        self.assertEqual(config["location"], {"place": "Bergen, Norway"})
+
+    def test_updates_existing_place_in_place(self) -> None:
+        self.config_path.write_text('[location]\nplace = "Oslo"\n')
+        common.set_config_location("Bergen, Norway", self.config_path)
+        self.assertEqual(common.load_config(self.config_path), {"location": {"place": "Bergen, Norway"}})
+
+    def test_other_sections_and_comments_are_untouched(self) -> None:
+        original = '[location]\nplace = "Oslo"\n\n[today]\n# a comment\nmin_hours = 12\n'
+        self.config_path.write_text(original)
+        common.set_config_location("Bergen, Norway", self.config_path)
+        text = self.config_path.read_text()
+        self.assertIn("# a comment", text)
+        self.assertIn("min_hours = 12", text)
+
+    def test_appends_section_if_missing_entirely(self) -> None:
+        self.config_path.write_text("[today]\nmin_hours = 12\n")
+        common.set_config_location("Oslo", self.config_path)
+        config = common.load_config(self.config_path)
+        self.assertEqual(config["location"], {"place": "Oslo"})
+        self.assertEqual(config["today"]["min_hours"], 12)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -36,10 +36,10 @@ exposed as one installed CLI: `yr <command>` (`project.scripts` in
 
 No built-in default location -- `--lat`/`--lon`, `--location <name>`,
 `--here`, or a `[location]` section in the settings file (see README) sets
-it; if none do, `cli.resolve_location()` falls back to IP geolocation for
-that one run with a loud Rich-panel warning (`_warn_no_location_configured`)
-to configure a real default, and only returns an error if that guess fails
-too (e.g. no network).
+it; if none do, `cli.resolve_location()` returns an error and `main()`
+prints only the error panel (exit code 1, no forecast) -- there is no
+silent IP-geolocation fallback for an unconfigured location. `--here`
+still explicitly opts into IP geolocation for that one run.
 
 ## Commands
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import time
 import tomllib
 import urllib.parse
@@ -28,10 +29,18 @@ NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 # Cloud-cover fraction (%) below which the sun is considered to break through.
 SUN_CLOUD_PCT = 75
 
-# TTLs (seconds) for fetch_json's response cache, per endpoint.
+# TTLs (seconds) for fetch_json's response cache, per endpoint. yr.no's
+# fair-use policy asks API consumers to cache responses rather than re-fetch
+# on every run -- these are the defaults. forecast/nowcast/alerts/geocode
+# are overridable per-installation via the settings file's [cache] section
+# (see cache_ttl()); sunrise/timezone resolution barely ever change and
+# aren't exposed there.
 SUNRISE_TTL = 12 * 3600
 TZ_TTL = 3 * 24 * 3600
 GEOCODE_TTL = 30 * 24 * 3600
+FORECAST_TTL = 45 * 60
+NOWCAST_TTL = 5 * 60
+ALERTS_TTL = 20 * 60
 
 # Compass arrows, index 0=N, 1=NE, ..., 7=NW.
 WIND_ARROWS = ["↑", "↗", "→", "↘", "↓", "↙", "←", "↖"]
@@ -44,6 +53,13 @@ _CACHE_ENABLED = True
 def set_cache_enabled(enabled: bool) -> None:
     global _CACHE_ENABLED
     _CACHE_ENABLED = enabled
+
+
+def cache_ttl(config: dict, key: str, default: int) -> int:
+    """TTL (seconds) for one [cache] setting from the settings file, falling
+    back to `default` if unset. 0 disables caching for that key entirely
+    (still subject to --no-cache/_CACHE_ENABLED, which forces 0 for all)."""
+    return config.get("cache", {}).get(key, default)
 
 
 def _default_cache_dir() -> Path:
@@ -89,21 +105,34 @@ DEFAULT_CONFIG_TOML = f"""\
 # yr-in-the-terminal settings. Edit values below, then re-run yr.
 
 [location]
-# Default location used when --lat/--lon, --location, and --here are all
+# Default place used when --lat/--lon, --location, and --here are all
 # omitted on the command line. yr ships with no built-in location -- one of
-# these (a flag, or this section) is required.
-# lat = 59.9139
-# lon = 10.7522
+# these (a flag, or this section) is required. Same format as --location: a
+# place name resolved via OpenStreetMap Nominatim (cached, see geocode_ttl
+# below) -- not saved by hand, `yr <command> --set-location "<name>"` writes
+# it here for you.
 # place = "Oslo"
 
 [today]
 # Minimum hours-ahead `yr today` shows when --hours is not given (rest of
 # today, but never less than this).
 min_hours = {DEFAULT_MIN_HOURS_AHEAD}
+
+[cache]
+# How long (seconds) a fetched response is reused before yr asks yr.no for
+# fresh data again. yr.no's fair-use policy asks API consumers to cache
+# responses rather than re-fetch on every run -- these are that policy's
+# defaults. Set any of them to 0 to always fetch live for that source, or
+# pass --no-cache on the command line to disable all caching for one run
+# without editing this file.
+forecast_ttl = {FORECAST_TTL} # Locationforecast (yr today + yr forecast); the model updates roughly hourly
+nowcast_ttl = {NOWCAST_TTL} # Nowcast radar (yr today only); MET issues a new radar frame every 5 minutes
+alerts_ttl = {ALERTS_TTL} # MET weather alerts (yr today only)
+geocode_ttl = {GEOCODE_TTL} # --location place-name lookups; a place's coordinates don't change
 """
 
 
-def _default_config_path() -> Path:
+def default_config_path() -> Path:
     base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
     return Path(base) / "yr-in-the-terminal" / "config.toml"
 
@@ -112,7 +141,7 @@ def load_config(path: Path | None = None, *, default_toml: str = "") -> dict:
     """Load the user settings file, creating it from `default_toml` on first run
     if it doesn't exist yet. {} if unreadable/invalid, or missing with no
     `default_toml` given -- never raises."""
-    config_path = path or _default_config_path()
+    config_path = path or default_config_path()
     if not config_path.exists() and default_toml:
         try:
             config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -124,6 +153,57 @@ def load_config(path: Path | None = None, *, default_toml: str = "") -> dict:
             return tomllib.load(f)
     except (OSError, tomllib.TOMLDecodeError):
         return {}
+
+
+_LOCATION_KEY_RE = re.compile(r"#?\s*(lat|lon|place)\s*=")
+
+
+def set_config_location(place: str, path: Path | None = None) -> None:
+    """Persist `place` (a plain name, resolved the same way --location
+    resolves one) as the settings file's [location] default, so a later run
+    with no --lat/--lon/--location/--here picks it up automatically.
+
+    Rewrites only the [location] section's lat/lon/place lines (dropping the
+    legacy lat/lon-based format if present, commented or not) with a single
+    `place = "..."` line; every other section, comment, and the rest of the
+    file's formatting is left untouched. Creates the file from
+    DEFAULT_CONFIG_TOML first if it doesn't exist yet. Never raises --
+    silently does nothing if the file can't be read or written.
+    """
+    config_path = path or default_config_path()
+    if not config_path.exists():
+        load_config(config_path, default_toml=DEFAULT_CONFIG_TOML)
+    try:
+        lines = config_path.read_text().splitlines(keepends=True)
+    except OSError:
+        return
+
+    place_line = f'place = "{place}"\n'
+    out: list[str] = []
+    in_location = False
+    found_section = inserted = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            if in_location and not inserted:
+                out.append(place_line)
+                inserted = True
+            in_location = stripped == "[location]"
+            found_section = found_section or in_location
+            out.append(line)
+            continue
+        if in_location and _LOCATION_KEY_RE.match(stripped):
+            continue
+        out.append(line)
+    if in_location and not inserted:
+        out.append(place_line)
+    if not found_section:
+        out.append(f"\n[location]\n{place_line}")
+
+    try:
+        config_path.write_text("".join(out))
+    except OSError:
+        pass
 
 
 def local_dt(iso: str, tz: ZoneInfo) -> datetime:
@@ -165,16 +245,19 @@ def resolve_default_location(
 _SAME_PLACE_DEGREES = 0.3
 
 
-def geocode_candidates(place: str, *, limit: int = 5, cache_dir: Path | None = None) -> list[tuple[float, float, str]]:
+def geocode_candidates(
+    place: str, *, limit: int = 5, cache_dir: Path | None = None, config: dict | None = None
+) -> list[tuple[float, float, str]]:
     """Resolve a place name to up to `limit` (lat, lon, display_name) matches
     via OpenStreetMap Nominatim, most-relevant first. [] on no match/failure.
 
     Candidates within _SAME_PLACE_DEGREES of an already-kept one are dropped
     as the same real-world place under a different OSM entry.
     """
+    ttl = cache_ttl(config or {}, "geocode_ttl", GEOCODE_TTL)
     try:
         results = fetch_json(
-            NOMINATIM_URL, {"q": place, "format": "json", "limit": str(limit)}, ttl=GEOCODE_TTL, cache_dir=cache_dir
+            NOMINATIM_URL, {"q": place, "format": "json", "limit": str(limit)}, ttl=ttl, cache_dir=cache_dir
         )
         candidates: list[tuple[float, float, str]] = []
         for r in results:
@@ -194,14 +277,16 @@ def geocode_candidates(place: str, *, limit: int = 5, cache_dir: Path | None = N
         return []
 
 
-def geocode(place: str, *, cache_dir: Path | None = None) -> tuple[float, float, str] | None:
+def geocode(
+    place: str, *, cache_dir: Path | None = None, config: dict | None = None
+) -> tuple[float, float, str] | None:
     """Resolve a place name to its single best (lat, lon, display_name) match.
 
     Returns None on no match or any failure -- the caller decides the fallback
     (unlike resolve_default_location, this has no single "default" to fall
     back to on its own, since the place name was explicitly requested).
     """
-    candidates = geocode_candidates(place, limit=1, cache_dir=cache_dir)
+    candidates = geocode_candidates(place, limit=1, cache_dir=cache_dir, config=config)
     return candidates[0] if candidates else None
 
 
