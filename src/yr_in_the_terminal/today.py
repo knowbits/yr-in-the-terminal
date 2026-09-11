@@ -1,10 +1,9 @@
-#!/usr/bin/env -S uv run python
-"""Print a detailed TODAY weather forecast from yr.no (MET Norway).
+"""Detailed TODAY weather forecast from yr.no (MET Norway).
 
-Companion to yr-forecast.py, focused on today instead of the week ahead:
+Companion to `forecast.py`, focused on today instead of the week ahead:
 
   * An hour-by-hour table covering the rest of today, styled like
-    yr-forecast.py's daily table. Rain ranges use the 5-minute Nowcast radar
+    forecast.py's daily table. Rain ranges use the 5-minute Nowcast radar
     samples throughout its ~2-hour horizon, including the third clock-hour
     row when appropriate; rows or row portions beyond it use Locationforecast
     2.0 /complete's one-value-per-hour forecast.
@@ -29,12 +28,6 @@ forecast -- itself already MET's physics-based model of how precipitation
 systems move and evolve -- rather than inventing new precision. It is styled
 and marked distinctly (dim bars, a divider, "~" on approximate times) so
 that's visible rather than implied.
-
-Requires: rich (installed into the project's UV-managed venv, see pyproject.toml)
-
-Run:  ./yr-today.py
-      ./yr-today.py --lat 60.10 --lon 9.58 --place "Veggli"
-      ./yr-today.py --hours 12
 """
 
 from __future__ import annotations
@@ -43,8 +36,7 @@ import argparse
 import json
 import sys
 import urllib.error
-import urllib.request
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from rich import box
@@ -52,12 +44,15 @@ from rich.console import Console, Group
 from rich.table import Table
 from rich.text import Text
 
-# yr.no fair-use terms require an identifying User-Agent header.
-USER_AGENT = "weather-today-table/1.0 (personal use)"
+from yr_in_the_terminal import common
+
 FORECAST_URL = "https://api.met.no/weatherapi/locationforecast/2.0/complete"
 NOWCAST_URL = "https://api.met.no/weatherapi/nowcast/2.0/complete"
-SUNRISE_URL = "https://api.met.no/weatherapi/sunrise/3.0/sun"
 ALERTS_URL = "https://api.met.no/weatherapi/metalerts/2.0/current.json"
+
+FORECAST_TTL = 45 * 60
+NOWCAST_TTL = 5 * 60
+ALERTS_TTL = 20 * 60
 
 TZ = ZoneInfo("Europe/Oslo")
 
@@ -69,9 +64,6 @@ RAIN_RATE_MM_H = 0.1
 STRONG_SHOWER_RATE_MM_H = 2.0
 # Number of near-term hours highlighted in the hourly table as "high confidence".
 NEAR_TERM_HOURS = 4
-# Cloud-cover fraction (%) below which the sun is considered to break through
-# (same threshold as yr-forecast.py, for consistent "sunny" wording).
-SUN_CLOUD_PCT = 75
 
 # MET alert riskMatrixColor -> Rich style.
 ALERT_COLORS = {
@@ -133,61 +125,6 @@ def get_symbol(code: str | None) -> tuple[str, str]:
     return ("❔", code)
 
 
-def fetch_json(url: str, params: dict[str, str]) -> dict:
-    query = "&".join(f"{k}={v}" for k, v in params.items())
-    req = urllib.request.Request(f"{url}?{query}", headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=20) as resp:
-        return json.load(resp)
-
-
-def local_dt(iso: str) -> datetime:
-    return datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(TZ)
-
-
-def utc_offset_str(d: datetime) -> str:
-    off = int(TZ.utcoffset(d).total_seconds())
-    sign = "+" if off >= 0 else "-"
-    off = abs(off)
-    return f"{sign}{off // 3600:02d}:{(off % 3600) // 60:02d}"
-
-
-def resolve_tz(lat: float, lon: float) -> ZoneInfo:
-    """Resolve the IANA timezone for a location (timeapi.io); longitude fallback."""
-    try:
-        url = f"https://timeapi.io/api/timezone/coordinate?latitude={lat}&longitude={lon}"
-        with urllib.request.urlopen(url, timeout=10) as resp:
-            name = json.load(resp).get("timeZone")
-        if name:
-            return ZoneInfo(name)
-    except (OSError, ValueError):
-        pass
-    return timezone(timedelta(hours=round(lon / 15.0)))
-
-
-def sunrise_sunset(d: datetime, lat: float, lon: float) -> tuple[datetime, datetime] | None:
-    try:
-        data = fetch_json(
-            SUNRISE_URL,
-            {
-                "lat": str(lat),
-                "lon": str(lon),
-                "date": d.strftime("%Y-%m-%d"),
-                "offset": utc_offset_str(d),
-            },
-        )
-        props = data["properties"]
-        rise = datetime.fromisoformat(props["sunrise"]["time"]).astimezone(TZ)
-        set_ = datetime.fromisoformat(props["sunset"]["time"]).astimezone(TZ)
-        return rise, set_
-    except (OSError, KeyError, ValueError):
-        return None
-
-
-def round_half_up(x: float) -> int:
-    """Round to nearest int; .5 and above rounds up (12.4 -> 12, 12.5 -> 13)."""
-    return int(x + (0.5 if x >= 0 else -0.5))
-
-
 def format_latlon(lat: float, lon: float) -> str:
     """Compact degrees + minutes, e.g. (62.36675, 6.42422) -> '62°22'N, 6°25'E'."""
 
@@ -204,30 +141,20 @@ def format_latlon(lat: float, lon: float) -> str:
     return f"{dm(lat, 'N', 'S')}, {dm(lon, 'E', 'W')}"
 
 
-# Compass arrows, index 0=N, 1=NE, ..., 7=NW.
-WIND_ARROWS = ["↑", "↗", "→", "↘", "↓", "↙", "←", "↖"]
-
-
-def wind_arrow(from_deg: float) -> str:
-    """Compass arrow pointing in the direction the wind blows TOWARD."""
-    to_deg = (from_deg + 180.0) % 360.0
-    return WIND_ARROWS[round(to_deg / 45.0) % 8]
-
-
 # ---------------------------------------------------------------------------
 # Hour-by-hour table (Locationforecast /complete)
 # ---------------------------------------------------------------------------
 
 
 def build_hourly_rows(lat: float, lon: float, n_hours: int, now: datetime) -> list[dict]:
-    fc = fetch_json(FORECAST_URL, {"lat": str(lat), "lon": str(lon)})
+    fc = common.fetch_json(FORECAST_URL, {"lat": str(lat), "lon": str(lon)}, ttl=FORECAST_TTL)
     ts = fc["properties"]["timeseries"]
     cutoff = now.replace(minute=0, second=0, microsecond=0)
 
     rows: list[dict] = []
     prev_t: datetime | None = None
     for p in ts:
-        t = local_dt(p["time"])
+        t = common.local_dt(p["time"], TZ)
         if t < cutoff:
             continue
         # Locationforecast steps from hourly to 3-/6-hourly resolution further
@@ -275,7 +202,7 @@ def is_sunny_hour(r: dict, sun: tuple[datetime, datetime] | None) -> bool:
     if not sun:
         return False
     rise, set_ = sun
-    return rise <= r["time"] < set_ and r.get("cloud") is not None and r["cloud"] < SUN_CLOUD_PCT
+    return rise <= r["time"] < set_ and r.get("cloud") is not None and r["cloud"] < common.SUN_CLOUD_PCT
 
 
 def render_hourly_table(
@@ -300,7 +227,7 @@ def render_hourly_table(
         row_style = "bold" if near else None
         hour_cell = f"{r['time']:%H:%M}"
 
-        temp = f"{round_half_up(r['temp']):>3d}°" if r["temp"] is not None else ""
+        temp = f"{common.round_half_up(r['temp']):>3d}°" if r["temp"] is not None else ""
 
         radar_range = radar_rain_ranges.get(i) if radar_rain_ranges else None
         if radar_range is not None:
@@ -325,7 +252,7 @@ def render_hourly_table(
         if rain:
             rain_cell.append(rain, style=_bar_color(rain_val))
 
-        pop = f"{round_half_up(r['pop'])}%" if r["pop"] is not None else ""
+        pop = f"{common.round_half_up(r['pop'])}%" if r["pop"] is not None else ""
         pop_cell = Text(pop, style=_pop_style(r["pop"]), justify="right")
 
         sun_cell = "☀️" if is_sunny_hour(r, sun) else ""
@@ -336,7 +263,7 @@ def render_hourly_table(
             if r["wind_gust"] is not None and r["wind_gust"] > r["wind_speed"] + 1:
                 wind += f" ({r['wind_gust']:.0f})"
             if r["wind_dir"] is not None:
-                wind += f" {wind_arrow(r['wind_dir'])}"
+                wind += f" {common.wind_arrow(r['wind_dir'])}"
 
         table.add_row(
             hour_cell,
@@ -365,7 +292,7 @@ def render_hourly_table(
 
 def build_nowcast(lat: float, lon: float) -> dict | None:
     try:
-        data = fetch_json(NOWCAST_URL, {"lat": str(lat), "lon": str(lon)})
+        data = common.fetch_json(NOWCAST_URL, {"lat": str(lat), "lon": str(lon)}, ttl=NOWCAST_TTL)
     except urllib.error.HTTPError as exc:
         if exc.code == 422:
             return None  # outside Nordic radar coverage
@@ -375,7 +302,7 @@ def build_nowcast(lat: float, lon: float) -> dict | None:
     ts = props["timeseries"]
     entries: list[tuple[datetime, float]] = []
     for p in ts:
-        t = local_dt(p["time"])
+        t = common.local_dt(p["time"], TZ)
         rate = p["data"]["instant"]["details"].get("precipitation_rate")
         if rate is not None:
             entries.append((t, rate))
@@ -921,7 +848,7 @@ def compute_radar_rain_ranges(
 
 def build_alerts(lat: float, lon: float) -> list[dict]:
     try:
-        data = fetch_json(ALERTS_URL, {"lat": str(lat), "lon": str(lon), "lang": "en"})
+        data = common.fetch_json(ALERTS_URL, {"lat": str(lat), "lon": str(lon), "lang": "en"}, ttl=ALERTS_TTL)
     except (urllib.error.URLError, ValueError, KeyError):
         return []
     return [f["properties"] for f in data.get("features", [])]
@@ -1064,7 +991,7 @@ def rain_headline(combined: dict | None, hourly_rows: list[dict], now: datetime)
 
 
 # ---------------------------------------------------------------------------
-# Sun hours today (cloud-cover based, same idea as yr-forecast.py)
+# Sun hours today (cloud-cover based, same idea as forecast.py)
 # ---------------------------------------------------------------------------
 
 
@@ -1082,7 +1009,7 @@ def build_sun_intervals(
         if t.date() != today:
             break
         cloud = r.get("cloud")
-        sunny = rise <= t < set_ and cloud is not None and cloud < SUN_CLOUD_PCT
+        sunny = rise <= t < set_ and cloud is not None and cloud < common.SUN_CLOUD_PCT
         if sunny and start is None:
             start = t
         elif not sunny and start is not None:
@@ -1125,16 +1052,16 @@ def current_conditions_line(nowcast: dict | None, hourly_rows: list[dict]) -> Te
         if s.get("precipitation_rate") is not None:
             parts.append(f"💧 {s['precipitation_rate']:.1f} mm/h")
         if s.get("wind_speed") is not None:
-            arrow = wind_arrow(s["wind_from_direction"]) if s.get("wind_from_direction") is not None else ""
+            arrow = common.wind_arrow(s["wind_from_direction"]) if s.get("wind_from_direction") is not None else ""
             parts.append(f"💨 {s['wind_speed']:.1f} m/s {arrow}".strip())
         if s.get("relative_humidity") is not None:
             parts.append(f"💦 {s['relative_humidity']:.0f}%")
     elif hourly_rows:
         r = hourly_rows[0]
         if r.get("temp") is not None:
-            parts.append(f"🌡️ {round_half_up(r['temp'])}°C")
+            parts.append(f"🌡️ {common.round_half_up(r['temp'])}°C")
         if r.get("wind_speed") is not None:
-            arrow = wind_arrow(r["wind_dir"]) if r.get("wind_dir") is not None else ""
+            arrow = common.wind_arrow(r["wind_dir"]) if r.get("wind_dir") is not None else ""
             parts.append(f"💨 {r['wind_speed']:.0f} m/s {arrow}".strip())
     return Text(" | ".join(parts), style="bright_black") if parts else None
 
@@ -1219,7 +1146,7 @@ def render(
         # Indented to line up with the text after the "☀  " symbol on the
         # line above it, not the left margin.
         indent = " " * len("☀  ")
-        sun_lines.append(Text(f"{indent}Sunny: when <{SUN_CLOUD_PCT}% overcast/clouds.", style="bright_black"))
+        sun_lines.append(Text(f"{indent}Sunny: when <{common.SUN_CLOUD_PCT}% overcast/clouds.", style="bright_black"))
 
     if nowcast is not None and combined is not None:
         chart_group = build_rain_chart(nowcast, combined, headline, now, max_width=console.width)
@@ -1263,22 +1190,46 @@ def render(
     render_hourly_table(console, hourly_rows, showers, sun, radar_rain_ranges)
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser(
-        description="Detailed today-only yr.no forecast: hourly table + radar rain nowcast.",
-        epilog="Example: yr-today.py --hours 12",
-    )
-    ap.add_argument("--lat", type=float, default=62.36675, help="latitude (default Hundeidvik)")
-    ap.add_argument("--lon", type=float, default=6.42422, help="longitude (default Hundeidvik)")
-    ap.add_argument("--place", default="Hundeidvik, Sykkylven", help="location label shown in the title")
-    ap.add_argument(
-        "--hours", type=int, default=None, help="number of hourly rows to show (default: rest of today, min 6)"
-    )
-    args = ap.parse_args()
+def build_json_payload(
+    place: str,
+    lat: float,
+    lon: float,
+    now: datetime,
+    nowcast: dict | None,
+    hourly_rows: list[dict],
+    sun: tuple[datetime, datetime] | None,
+    alerts: list[dict],
+) -> dict:
+    combined = build_combined_rain(nowcast, hourly_rows)
+    return {
+        "place": place,
+        "lat": lat,
+        "lon": lon,
+        "generated_at": now.isoformat(),
+        "sun": {"sunrise": sun[0].isoformat(), "sunset": sun[1].isoformat()} if sun else None,
+        "alerts": alerts,
+        "rain_headline": rain_headline(combined, hourly_rows, now).plain,
+        "hourly": [
+            {
+                "time": r["time"].isoformat(),
+                "symbol": r["symbol"],
+                "temp_c": r["temp"],
+                "rain_mm": r["rain"],
+                "rain_mm_max": r["rain_max"],
+                "rain_probability_pct": r["pop"],
+                "wind_speed_ms": r["wind_speed"],
+                "wind_gust_ms": r["wind_gust"],
+                "wind_from_deg": r["wind_dir"],
+            }
+            for r in hourly_rows
+        ],
+    }
 
+
+def run(args: argparse.Namespace) -> int:
     global TZ
     try:
-        TZ = resolve_tz(args.lat, args.lon)
+        TZ = common.resolve_tz(args.lat, args.lon)
         now = datetime.now(TZ)
 
         n_hours = args.hours
@@ -1287,15 +1238,15 @@ def main() -> int:
 
         nowcast = build_nowcast(args.lat, args.lon)
         hourly_rows = build_hourly_rows(args.lat, args.lon, n_hours, now)
-        sun = sunrise_sunset(now, args.lat, args.lon)
+        sun = common.sunrise_sunset(now, args.lat, args.lon, TZ)
         alerts = build_alerts(args.lat, args.lon)
     except urllib.error.URLError as exc:
         print(f"error: could not reach yr.no: {exc}", file=sys.stderr)
         return 1
 
+    if args.json:
+        print(json.dumps(build_json_payload(args.place, args.lat, args.lon, now, nowcast, hourly_rows, sun, alerts)))
+        return 0
+
     render(args.place, args.lat, args.lon, now, nowcast, hourly_rows, sun, alerts)
     return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

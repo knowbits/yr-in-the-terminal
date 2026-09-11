@@ -1,0 +1,14 @@
+{
+  "exclude": [
+    "target/",
+    "build/",
+    "node_modules/",
+    ".venv/",
+    "out-static/",
+    "tmp-*/"
+  ],
+  "deprioritize": [
+    "scripts-AI/",
+    "docs-AI/"
+  ]
+}

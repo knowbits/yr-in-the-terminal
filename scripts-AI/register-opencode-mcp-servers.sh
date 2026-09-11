@@ -1,0 +1,1 @@
+../../COMMON/scripts/register-opencode-mcp-servers.sh

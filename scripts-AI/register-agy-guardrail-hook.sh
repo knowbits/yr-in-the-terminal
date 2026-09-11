@@ -1,0 +1,1 @@
+../../COMMON/scripts/register-agy-guardrail-hook.sh

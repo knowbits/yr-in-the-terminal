@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "rules": [
+  {
+    "id": "framework-docs-ai-protect",
+    "pattern": "**/docs-AI/**",
+    "deny_regex": ["[\\s\\S]*"],
+    "message": "docs-AI/ is framework-owned (installed by init-repo-ai-workflow.sh) — AI-driven edits are not allowed. Re-run init-repo-ai-workflow.sh/uninstall-repo-ai-workflow.sh from COMMON to maintain it."
+  },
+  {
+    "id": "framework-scripts-ai-protect",
+    "pattern": "**/scripts-AI/**",
+    "deny_regex": ["[\\s\\S]*"],
+    "message": "scripts-AI/ is framework-owned (installed by init-repo-ai-workflow.sh) — AI-driven edits are not allowed. Re-run init-repo-ai-workflow.sh/uninstall-repo-ai-workflow.sh from COMMON to maintain it."
+  }
+  ]
+}

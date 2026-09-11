@@ -1,0 +1,1 @@
+../../COMMON/scripts/register-opencode-guardrail-hook.sh

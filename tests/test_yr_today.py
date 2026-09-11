@@ -1,18 +1,12 @@
 from __future__ import annotations
 
-import importlib.util
 import io
 import unittest
 from datetime import datetime, timedelta
-from pathlib import Path
 
 from rich.console import Console
 
-SCRIPT_PATH = Path(__file__).parents[1] / "yr-today.py"
-SPEC = importlib.util.spec_from_file_location("yr_today", SCRIPT_PATH)
-assert SPEC is not None and SPEC.loader is not None
-yr_today = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(yr_today)
+from yr_in_the_terminal import today as yr_today
 
 
 class RadarRainRangesTest(unittest.TestCase):

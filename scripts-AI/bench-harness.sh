@@ -1,0 +1,1 @@
+../../COMMON/scripts/bench-harness.sh

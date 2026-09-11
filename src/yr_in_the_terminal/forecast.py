@@ -1,15 +1,9 @@
-#!/usr/bin/env -S uv run python
-"""Print a 7-day weather forecast table from yr.no (MET Norway).
+"""7-day weather forecast table from yr.no (MET Norway).
 
 Fetches Locationforecast 2.0 (compact) and Sunrise 3.0, aggregates to one row
 per day, and renders a coloured table via Rich.
 
 Default location: Hundeidvik, Sykkylven, Norway.
-
-Requires: rich (installed into the project's UV-managed venv, see pyproject.toml)
-
-Run:  ./yr-forecast.py
-      ./yr-forecast.py --lat 60.10 --lon 9.58 --place "Veggli"
 """
 
 from __future__ import annotations
@@ -18,26 +12,24 @@ import argparse
 import json
 import math
 import sys
-import urllib.request
+import urllib.error
 from collections import Counter, defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
-# yr.no fair-use terms require an identifying User-Agent header.
-USER_AGENT = "weather-forecast-table/1.0 (personal use)"
+from yr_in_the_terminal import common
+
 FORECAST_URL = "https://api.met.no/weatherapi/locationforecast/2.0/compact"
-SUNRISE_URL = "https://api.met.no/weatherapi/sunrise/3.0/sun"
+FORECAST_TTL = 45 * 60
 
 TZ = ZoneInfo("Europe/Oslo")
 
 # Rain threshold (mm) above which an hour counts as "raining".
 RAIN_MM = 0.05
-# Cloud-cover fraction (%) below which the sun is considered to break through.
-SUN_CLOUD_PCT = 75
 
 # symbol_code -> (emoji, label). Prefix match on the base (day/night) is used.
 SYMBOLS = {
@@ -60,61 +52,14 @@ SYMBOLS = {
 }
 
 
-def fetch_json(url: str, params: dict[str, str]) -> dict:
-    query = "&".join(f"{k}={v}" for k, v in params.items())
-    req = urllib.request.Request(f"{url}?{query}", headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=20) as resp:
-        return json.load(resp)
-
-
-def local_dt(iso: str) -> datetime:
-    return datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(TZ)
-
-
-def utc_offset_str(d: datetime) -> str:
-    off = int(TZ.utcoffset(d).total_seconds())
-    sign = "+" if off >= 0 else "-"
-    off = abs(off)
-    return f"{sign}{off // 3600:02d}:{(off % 3600) // 60:02d}"
-
-
-def resolve_tz(lat: float, lon: float) -> ZoneInfo:
-    """Resolve the IANA timezone for a location (timeapi.io); longitude fallback."""
-    try:
-        url = f"https://timeapi.io/api/timezone/coordinate?latitude={lat}&longitude={lon}"
-        with urllib.request.urlopen(url, timeout=10) as resp:
-            name = json.load(resp).get("timeZone")
-        if name:
-            return ZoneInfo(name)
-    except (OSError, ValueError):
-        pass
-    return timezone(timedelta(hours=round(lon / 15.0)))
-
-
-def sunrise_sunset(d: datetime, lat: float, lon: float) -> tuple[datetime, datetime]:
-    data = fetch_json(
-        SUNRISE_URL,
-        {
-            "lat": str(lat),
-            "lon": str(lon),
-            "date": d.strftime("%Y-%m-%d"),
-            "offset": utc_offset_str(d),
-        },
-    )
-    props = data["properties"]
-    rise = datetime.fromisoformat(props["sunrise"]["time"]).astimezone(TZ)
-    set_ = datetime.fromisoformat(props["sunset"]["time"]).astimezone(TZ)
-    return rise, set_
-
-
-def build_hourly(timeseries: list[dict], exclude_night: bool = False) -> tuple[dict, dict, dict]:
+def build_hourly(timeseries: list[dict], tz: ZoneInfo, exclude_night: bool = False) -> tuple[dict, dict, dict]:
     """Return (precip per local hour, cloud per (day, hour), daily meta)."""
     precip = defaultdict(float)  # datetime -> mm
     cloud = defaultdict(dict)  # date -> {hour: cloud_pct}
     meta: dict = {}  # date -> {min,max,syms,day_syms,first,last}
 
     for p in timeseries:
-        t = local_dt(p["time"])
+        t = common.local_dt(p["time"], tz)
         data = p["data"]
         d = t.date()
 
@@ -210,26 +155,11 @@ def iv_str(runs: list[tuple[int, int]]) -> str:
     return " ".join(f"[{t(s)}-{t(e)}]" for s, e in runs)
 
 
-def round_half_up(x: float) -> int:
-    """Round to nearest int; .5 and above rounds up (12.4 -> 12, 12.5 -> 13)."""
-    return int(x + (0.5 if x >= 0 else -0.5))
-
-
-# Compass arrows, index 0=N, 1=NE, ..., 7=NW.
-WIND_ARROWS = ["↑", "↗", "→", "↘", "↓", "↙", "←", "↖"]
-
-
 def circular_mean(angles: list[float]) -> float:
     """Mean of angles (degrees), wrapping correctly across 0/360."""
     x = sum(math.cos(math.radians(a)) for a in angles)
     y = sum(math.sin(math.radians(a)) for a in angles)
     return math.degrees(math.atan2(y, x)) % 360.0
-
-
-def wind_arrow(from_deg: float) -> str:
-    """Compass arrow pointing in the direction the wind blows TOWARD."""
-    to_deg = (from_deg + 180.0) % 360.0
-    return WIND_ARROWS[round(to_deg / 45.0) % 8]
 
 
 # Ranking for resolving dry-day symbol ties: clearer sky wins.
@@ -268,9 +198,9 @@ def weather(rec: dict, rain_total: float) -> tuple[str, str]:
 
 def build_rows(lat: float, lon: float, n_days: int, exclude_night: bool = False) -> list[dict]:
     global TZ
-    TZ = resolve_tz(lat, lon)
-    fc = fetch_json(FORECAST_URL, {"lat": str(lat), "lon": str(lon)})
-    precip, cloud, meta = build_hourly(fc["properties"]["timeseries"], exclude_night)
+    TZ = common.resolve_tz(lat, lon)
+    fc = common.fetch_json(FORECAST_URL, {"lat": str(lat), "lon": str(lon)}, ttl=FORECAST_TTL)
+    precip, cloud, meta = build_hourly(fc["properties"]["timeseries"], TZ, exclude_night)
 
     def in_window(h: int) -> bool:
         return not exclude_night or h >= 6
@@ -280,9 +210,7 @@ def build_rows(lat: float, lon: float, n_days: int, exclude_night: bool = False)
         rec = meta[d]
         rain_total = sum(v for t, v in precip.items() if t.date() == d and in_window(t.hour))
 
-        rise, set_ = sunrise_sunset(datetime(d.year, d.month, d.day, tzinfo=TZ), lat, lon)
-        rise_h = rise.hour + rise.minute / 60.0
-        set_h = set_.hour + set_.minute / 60.0
+        sun = common.sunrise_sunset(datetime(d.year, d.month, d.day, tzinfo=TZ), lat, lon, TZ)
 
         # Rainy hours: reconstructed precip above threshold.
         rain_state = {}
@@ -291,21 +219,29 @@ def build_rows(lat: float, lon: float, n_days: int, exclude_night: bool = False)
                 rain_state[t.hour] = True
         rain_iv = intervals(rain_state, None)
 
-        # Sunny hours: daylight hours with cloud cover below threshold.
-        sun_state = {h: (cloud[d].get(h, 100) < SUN_CLOUD_PCT) for h in range(24)}
-        sun_iv = intervals(
-            sun_state,
-            lambda h: rise_h <= h and (h + 1) <= set_h and in_window(h),
-        )
+        # Sunny hours: daylight hours with cloud cover below threshold. A
+        # sunrise/sunset lookup failure degrades to an empty sun column
+        # rather than crashing the whole 7-day table.
+        if sun is not None:
+            rise, set_ = sun
+            rise_h = rise.hour + rise.minute / 60.0
+            set_h = set_.hour + set_.minute / 60.0
+            sun_state = {h: (cloud[d].get(h, 100) < common.SUN_CLOUD_PCT) for h in range(24)}
+            sun_iv = intervals(
+                sun_state,
+                lambda h: rise_h <= h and (h + 1) <= set_h and in_window(h),
+            )
+        else:
+            sun_iv = []
 
         partial = rec["first"] > 6 or rec["last"] < 18
         emoji, label = weather(rec, rain_total)
         day_temps = rec["day_temps"]
-        avg = round_half_up(sum(day_temps) / len(day_temps)) if day_temps else None
-        wind_min = round_half_up(rec["wind_min"]) if rec["wind_min"] is not None else None
-        wind_max = round_half_up(rec["wind_max"]) if rec["wind_max"] is not None else None
-        wind_avg = round_half_up(sum(rec["day_winds"]) / len(rec["day_winds"])) if rec["day_winds"] else None
-        wind_dir = wind_arrow(circular_mean(rec["day_wind_dirs"])) if rec["day_wind_dirs"] else ""
+        avg = common.round_half_up(sum(day_temps) / len(day_temps)) if day_temps else None
+        wind_min = common.round_half_up(rec["wind_min"]) if rec["wind_min"] is not None else None
+        wind_max = common.round_half_up(rec["wind_max"]) if rec["wind_max"] is not None else None
+        wind_avg = common.round_half_up(sum(rec["day_winds"]) / len(rec["day_winds"])) if rec["day_winds"] else None
+        wind_dir = common.wind_arrow(circular_mean(rec["day_wind_dirs"])) if rec["day_wind_dirs"] else ""
 
         rows.append(
             {
@@ -361,8 +297,8 @@ def render(rows: list[dict], place: str, exclude_night: bool = False) -> None:
         day = f"{r['date']:%a} {r['date'].day:>2}"
         if r["partial"]:
             partial_days.append(day)
-        low = round_half_up(r["low"])
-        high = round_half_up(r["high"])
+        low = common.round_half_up(r["low"])
+        high = common.round_half_up(r["high"])
         temp = f"{low:>2d}°–{high:>2d}°"
         if r["avg"] is not None:
             temp += f" [{r['avg']:>2d}°]"
@@ -390,30 +326,46 @@ def render(rows: list[dict], place: str, exclude_night: bool = False) -> None:
     console.print(
         "[bright_black]Rain/Sun time: contiguous hours; "
         "Sun = daylight hours with cloud cover < "
-        f"{SUN_CLOUD_PCT}%.[/bright_black]"
+        f"{common.SUN_CLOUD_PCT}%.[/bright_black]"
     )
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser(
-        description="7-day yr.no forecast table.",
-        epilog="Example: yr-forecast --days 5 --exclude-night",
-    )
-    ap.add_argument("--lat", type=float, default=62.36675, help="latitude (default Hundeidvik)")
-    ap.add_argument("--lon", type=float, default=6.42422, help="longitude (default Hundeidvik)")
-    ap.add_argument("--place", default="Hundeidvik, Sykkylven", help="location label shown in the title")
-    ap.add_argument("--days", type=int, default=7, help="number of forecast days to show")
-    ap.add_argument("--exclude-night", action="store_true", help="only use hours 06:00-24:00 for temps/rain/sun")
-    args = ap.parse_args()
+def build_json_payload(rows: list[dict], place: str, lat: float, lon: float) -> dict:
+    return {
+        "place": place,
+        "lat": lat,
+        "lon": lon,
+        "days": [
+            {
+                "date": r["date"].isoformat(),
+                "partial": r["partial"],
+                "symbol": f"{r['emoji']} {r['label']}",
+                "temp_low_c": r["low"],
+                "temp_high_c": r["high"],
+                "temp_avg_c": r["avg"],
+                "rain_mm": r["rain"],
+                "rain_hours": r["rain_iv"],
+                "sun_hours": r["sun_iv"],
+                "wind_min_ms": r["wind_min"],
+                "wind_max_ms": r["wind_max"],
+                "wind_avg_ms": r["wind_avg"],
+                "wind_dir": r["wind_dir"],
+            }
+            for r in rows
+        ],
+    }
 
+
+def run(args: argparse.Namespace) -> int:
     try:
         rows = build_rows(args.lat, args.lon, args.days, args.exclude_night)
     except urllib.error.URLError as exc:
         print(f"error: could not reach yr.no: {exc}", file=sys.stderr)
         return 1
+
+    if args.json:
+        print(json.dumps(build_json_payload(rows, args.place, args.lat, args.lon)))
+        return 0
+
     render(rows, args.place, args.exclude_night)
     return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

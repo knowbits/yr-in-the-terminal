@@ -1,0 +1,1 @@
+../../COMMON/scripts/register-copilot-guardrail-hook.sh

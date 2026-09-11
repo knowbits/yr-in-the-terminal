@@ -1,0 +1,1 @@
+../../COMMON/scripts/ai-knowledge.sh

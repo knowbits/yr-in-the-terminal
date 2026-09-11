@@ -1,0 +1,65 @@
+{
+  "ai-guard-token-enforcement": {
+    "enabled": true,
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "hook=\"$(d=\"$(pwd -P)\"; s=\"$d\"; while [ -n \"$d\" ]; do if [ -f \"$d/AGENTS.md\" ] || [ -d \"$d/.codegraph\" ] || [ -e \"$d/.git\" ]; then printf \"%s\" \"$d\"; break; fi; if [ \"$d\" = / ]; then printf \"%s\" \"$s\"; break; fi; d=\"${d%/*}\"; [ -n \"$d\" ] || d=/; done)/../COMMON/hooks/token-advisory-hook.sh\"; if [ -x \"$hook\" ]; then \"$hook\" --schema agy --event SessionStart; elif [ -x \"$HOME/DEV_REPOS/COMMON/hooks/token-advisory-hook.sh\" ]; then \"$HOME/DEV_REPOS/COMMON/hooks/token-advisory-hook.sh\" --schema agy --event SessionStart; else echo \"{}\"; fi",
+        "timeout": 5
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "exec ai-guard --schema agy --json",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "export AI_CHECKPOINT_SOFT_CTX=150000; hook=\"$(d=\"$(pwd -P)\"; s=\"$d\"; while [ -n \"$d\" ]; do if [ -f \"$d/AGENTS.md\" ] || [ -d \"$d/.codegraph\" ] || [ -e \"$d/.git\" ]; then printf \"%s\" \"$d\"; break; fi; if [ \"$d\" = / ]; then printf \"%s\" \"$s\"; break; fi; d=\"${d%/*}\"; [ -n \"$d\" ] || d=/; done)/../COMMON/hooks/plan-runner-ceiling-hook.sh\"; if [ -x \"$hook\" ]; then \"$hook\" --schema agy; elif [ -x \"$HOME/DEV_REPOS/COMMON/hooks/plan-runner-ceiling-hook.sh\" ]; then \"$HOME/DEV_REPOS/COMMON/hooks/plan-runner-ceiling-hook.sh\" --schema agy; else exit 0; fi",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "hook=\"$(d=\"$(pwd -P)\"; s=\"$d\"; while [ -n \"$d\" ]; do if [ -f \"$d/AGENTS.md\" ] || [ -d \"$d/.codegraph\" ] || [ -e \"$d/.git\" ]; then printf \"%s\" \"$d\"; break; fi; if [ \"$d\" = / ]; then printf \"%s\" \"$s\"; break; fi; d=\"${d%/*}\"; [ -n \"$d\" ] || d=/; done)/../COMMON/hooks/token-advisory-hook.sh\"; if [ -x \"$hook\" ]; then \"$hook\" --schema agy --event PostToolUse; elif [ -x \"$HOME/DEV_REPOS/COMMON/hooks/token-advisory-hook.sh\" ]; then \"$HOME/DEV_REPOS/COMMON/hooks/token-advisory-hook.sh\" --schema agy --event PostToolUse; else echo \"{}\"; fi",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "export AI_CHECKPOINT_SOFT_CTX=150000; hook=\"$(d=\"$(pwd -P)\"; s=\"$d\"; while [ -n \"$d\" ]; do if [ -f \"$d/AGENTS.md\" ] || [ -d \"$d/.codegraph\" ] || [ -e \"$d/.git\" ]; then printf \"%s\" \"$d\"; break; fi; if [ \"$d\" = / ]; then printf \"%s\" \"$s\"; break; fi; d=\"${d%/*}\"; [ -n \"$d\" ] || d=/; done)/../COMMON/hooks/plan-runner-ceiling-hook.sh\"; if [ -x \"$hook\" ]; then \"$hook\" --schema agy --event PostToolUse; elif [ -x \"$HOME/DEV_REPOS/COMMON/hooks/plan-runner-ceiling-hook.sh\" ]; then \"$HOME/DEV_REPOS/COMMON/hooks/plan-runner-ceiling-hook.sh\" --schema agy --event PostToolUse; else echo \"{}\"; fi",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "hook=\"$(d=\"$(pwd -P)\"; s=\"$d\"; while [ -n \"$d\" ]; do if [ -f \"$d/AGENTS.md\" ] || [ -d \"$d/.codegraph\" ] || [ -e \"$d/.git\" ]; then printf \"%s\" \"$d\"; break; fi; if [ \"$d\" = / ]; then printf \"%s\" \"$s\"; break; fi; d=\"${d%/*}\"; [ -n \"$d\" ] || d=/; done)/../COMMON/hooks/token-advisory-hook.sh\"; if [ -x \"$hook\" ]; then \"$hook\" --schema agy --event PreInvocation; elif [ -x \"$HOME/DEV_REPOS/COMMON/hooks/token-advisory-hook.sh\" ]; then \"$HOME/DEV_REPOS/COMMON/hooks/token-advisory-hook.sh\" --schema agy --event PreInvocation; else echo \"{}\"; fi",
+        "timeout": 10
+      },
+      {
+        "type": "command",
+        "command": "export AI_CHECKPOINT_SOFT_CTX=150000; hook=\"$(d=\"$(pwd -P)\"; s=\"$d\"; while [ -n \"$d\" ]; do if [ -f \"$d/AGENTS.md\" ] || [ -d \"$d/.codegraph\" ] || [ -e \"$d/.git\" ]; then printf \"%s\" \"$d\"; break; fi; if [ \"$d\" = / ]; then printf \"%s\" \"$s\"; break; fi; d=\"${d%/*}\"; [ -n \"$d\" ] || d=/; done)/../COMMON/hooks/plan-runner-ceiling-hook.sh\"; if [ -x \"$hook\" ]; then \"$hook\" --schema agy --event PreInvocation; elif [ -x \"$HOME/DEV_REPOS/COMMON/hooks/plan-runner-ceiling-hook.sh\" ]; then \"$HOME/DEV_REPOS/COMMON/hooks/plan-runner-ceiling-hook.sh\" --schema agy --event PreInvocation; else echo \"{}\"; fi",
+        "timeout": 5
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "hook=\"$(d=\"$(pwd -P)\"; s=\"$d\"; while [ -n \"$d\" ]; do if [ -f \"$d/AGENTS.md\" ] || [ -d \"$d/.codegraph\" ] || [ -e \"$d/.git\" ]; then printf \"%s\" \"$d\"; break; fi; if [ \"$d\" = / ]; then printf \"%s\" \"$s\"; break; fi; d=\"${d%/*}\"; [ -n \"$d\" ] || d=/; done)/../COMMON/hooks/plan-runner-stop-hook.sh\"; if [ -x \"$hook\" ]; then \"$hook\" --schema agy; elif [ -x \"$HOME/DEV_REPOS/COMMON/hooks/plan-runner-stop-hook.sh\" ]; then \"$HOME/DEV_REPOS/COMMON/hooks/plan-runner-stop-hook.sh\" --schema agy; else exit 0; fi",
+        "timeout": 5
+      }
+    ]
+  }
+}

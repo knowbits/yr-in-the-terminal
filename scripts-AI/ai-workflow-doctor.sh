@@ -1,0 +1,1 @@
+../../COMMON/scripts/ai-workflow-doctor.sh

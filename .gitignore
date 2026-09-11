@@ -1,6 +1,8 @@
 # Python
 __pycache__/
 *.pyc
+dist/
+*.egg-info/
 
 # UV / venv
 .venv/
@@ -9,3 +11,9 @@ uv.lock.bak
 # Test / lint caches
 .pytest_cache/
 .ruff_cache/
+
+.ai-cache/
+
+# Temporary files and folders
+
+tmp*

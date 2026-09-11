@@ -1,0 +1,1 @@
+../../COMMON/scripts/test-ai-workflow.sh
