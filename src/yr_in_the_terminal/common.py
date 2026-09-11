@@ -111,7 +111,7 @@ DEFAULT_CONFIG_TOML = f"""\
 # place name resolved via OpenStreetMap Nominatim (cached, see geocode_ttl
 # below) -- not saved by hand, `yr <command> --set-location "<name>"` writes
 # it here for you.
-# place = "Oslo"
+# location = "Oslo"
 
 [today]
 # Minimum hours-ahead `yr today` shows when --hours is not given (rest of
@@ -155,7 +155,7 @@ def load_config(path: Path | None = None, *, default_toml: str = "") -> dict:
         return {}
 
 
-_LOCATION_KEY_RE = re.compile(r"#?\s*(lat|lon|place)\s*=")
+_LOCATION_KEY_RE = re.compile(r"#?\s*(lat|lon|place|location)\s*=")
 
 
 def set_config_location(place: str, path: Path | None = None) -> None:
@@ -163,12 +163,13 @@ def set_config_location(place: str, path: Path | None = None) -> None:
     resolves one) as the settings file's [location] default, so a later run
     with no --lat/--lon/--location/--here picks it up automatically.
 
-    Rewrites only the [location] section's lat/lon/place lines (dropping the
-    legacy lat/lon-based format if present, commented or not) with a single
-    `place = "..."` line; every other section, comment, and the rest of the
-    file's formatting is left untouched. Creates the file from
-    DEFAULT_CONFIG_TOML first if it doesn't exist yet. Never raises --
-    silently does nothing if the file can't be read or written.
+    Rewrites only the [location] section's lat/lon/place/location lines
+    (dropping the legacy lat/lon-based format, or an older `place = ...` key,
+    if present, commented or not) with a single `location = "..."` line;
+    every other section, comment, and the rest of the file's formatting is
+    left untouched. Creates the file from DEFAULT_CONFIG_TOML first if it
+    doesn't exist yet. Never raises -- silently does nothing if the file
+    can't be read or written.
     """
     config_path = path or default_config_path()
     if not config_path.exists():
@@ -178,7 +179,7 @@ def set_config_location(place: str, path: Path | None = None) -> None:
     except OSError:
         return
 
-    place_line = f'place = "{place}"\n'
+    location_line = f'location = "{place}"\n'
     out: list[str] = []
     in_location = False
     found_section = inserted = False
@@ -186,7 +187,7 @@ def set_config_location(place: str, path: Path | None = None) -> None:
         stripped = line.strip()
         if stripped.startswith("[") and stripped.endswith("]"):
             if in_location and not inserted:
-                out.append(place_line)
+                out.append(location_line)
                 inserted = True
             in_location = stripped == "[location]"
             found_section = found_section or in_location
@@ -196,9 +197,9 @@ def set_config_location(place: str, path: Path | None = None) -> None:
             continue
         out.append(line)
     if in_location and not inserted:
-        out.append(place_line)
+        out.append(location_line)
     if not found_section:
-        out.append(f"\n[location]\n{place_line}")
+        out.append(f"\n[location]\n{location_line}")
 
     try:
         config_path.write_text("".join(out))

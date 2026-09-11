@@ -300,19 +300,19 @@ def resolve_location(args: argparse.Namespace, config: dict) -> str | None:
                 "--lat/--lon instead if this doesn't look right",
                 file=sys.stderr,
             )
-    elif not explicit and loc_cfg.get("place"):
-        resolved = common.geocode(loc_cfg["place"], config=config)
+    elif not explicit and loc_cfg.get("location"):
+        resolved = common.geocode(loc_cfg["location"], config=config)
         if resolved is None:
-            print(f"warning: could not resolve configured location {loc_cfg['place']!r}", file=sys.stderr)
+            print(f"warning: could not resolve configured location {loc_cfg['location']!r}", file=sys.stderr)
         else:
             args.lat, args.lon, args.place = resolved
 
     if args.lat is None or args.lon is None:
-        if not explicit and not location_query and not args.here and not loc_cfg.get("place"):
+        if not explicit and not location_query and not args.here and not loc_cfg.get("location"):
             return NO_LOCATION_ERROR
         return (
             "no location given -- pass --lat/--lon, --location <name>, or --here, "
-            r"or set \[location] place in the settings file (see README)"
+            r"or set \[location] location in the settings file (see README)"
         )
 
     if not args.place:
@@ -347,7 +347,7 @@ def main() -> int:
                 "No DEFAULT location has been set yet!\n\n"
                 "Set a real default so you don't need this guess every time:\n"
                 '  [green]yr today --set-location "Your City"[/green]\n\n'
-                r"or add \[location] place to the settings file (see README).",
+                r"or add \[location] location to the settings file (see README).",
                 title="⚠ No default location set",
                 border_style="red",
                 expand=False,

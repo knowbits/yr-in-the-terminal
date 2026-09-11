@@ -125,23 +125,31 @@ beyond that:
 
 ```toml
 [location]
-# place = "Oslo"
+location = "Oslo"
 
 [today]
 min_hours = 12
 
 [cache]
+# How long (seconds) Locationforecast (the hourly model) responses are
+# reused. Set to 0 to always fetch live.
 forecast_ttl = 2700
+# How long (seconds) Nowcast radar responses are reused. Set to 0 to always
+# fetch live.
 nowcast_ttl = 300
+# How long (seconds) MET weather alerts are reused. Set to 0 to always fetch
+# live.
 alerts_ttl = 1200
+# How long (seconds) place-name -> coordinates lookups are reused. Set to 0
+# to always fetch live.
 geocode_ttl = 2592000
 ```
 
 - `[location]` — default place (geocoded the same way `--location` resolves
   one) when no `--lat`/`--lon`/`--location`/`--here` flag is given (see
   [Location](#location)); commented out by default since there's no
-  built-in default. Set it with `yr <command> --set-location "<name>"`
-  rather than by hand
+  built-in default (shown active above as an example). Set it with
+  `yr <command> --set-location "<name>"` rather than by hand
 - `[today].min_hours` — floor for `yr today`'s default row count (`--hours`
   on the command line always overrides it)
 - `[cache]` — see [Caching](#caching) below

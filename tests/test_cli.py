@@ -28,7 +28,7 @@ class ResolveLocationTest(unittest.TestCase):
 
     def test_explicit_lat_lon_wins_over_everything(self) -> None:
         args = _args(lat=1.0, lon=2.0, location="Oslo", here=True)
-        error = cli.resolve_location(args, {"location": {"place": "Nowhere"}})
+        error = cli.resolve_location(args, {"location": {"location": "Nowhere"}})
         self.assertIsNone(error)
         self.assertEqual((args.lat, args.lon), (1.0, 2.0))
 
@@ -62,7 +62,7 @@ class ResolveLocationTest(unittest.TestCase):
 
     def test_location_flag_failure_does_not_consult_config(self) -> None:
         args = _args(location="Nonexistentplacexyz123")
-        config = {"location": {"place": "Configured Place"}}
+        config = {"location": {"location": "Configured Place"}}
         # --location failing is a hard error -- it doesn't fall through to
         # the config's [location] or guess via IP geolocation.
         with mock.patch("yr_in_the_terminal.common.geocode_candidates", return_value=[]):
@@ -71,7 +71,7 @@ class ResolveLocationTest(unittest.TestCase):
 
     def test_config_location_used_when_nothing_else_given(self) -> None:
         args = _args()
-        config = {"location": {"place": "Springfield"}}
+        config = {"location": {"location": "Springfield"}}
         with mock.patch("yr_in_the_terminal.common.geocode", return_value=(3.0, 4.0, "Springfield, Illinois")) as geo:
             error = cli.resolve_location(args, config)
         self.assertIsNone(error)
@@ -80,7 +80,7 @@ class ResolveLocationTest(unittest.TestCase):
 
     def test_config_location_failure_is_a_hard_error(self) -> None:
         args = _args()
-        config = {"location": {"place": "Nonexistentplacexyz123"}}
+        config = {"location": {"location": "Nonexistentplacexyz123"}}
         with mock.patch("yr_in_the_terminal.common.geocode", return_value=None):
             error = cli.resolve_location(args, config)
         self.assertIsNotNone(error)
