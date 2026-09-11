@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import time
+import tomllib
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -80,6 +81,29 @@ def fetch_json(url: str, params: dict[str, str], *, ttl: int = 0, cache_dir: Pat
             pass
 
     return body
+
+
+def _default_config_path() -> Path:
+    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(base) / "yr-in-the-terminal" / "config.toml"
+
+
+def load_config(path: Path | None = None, *, default_toml: str = "") -> dict:
+    """Load the user settings file, creating it from `default_toml` on first run
+    if it doesn't exist yet. {} if unreadable/invalid, or missing with no
+    `default_toml` given -- never raises."""
+    config_path = path or _default_config_path()
+    if not config_path.exists() and default_toml:
+        try:
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            config_path.write_text(default_toml)
+        except OSError:
+            pass
+    try:
+        with config_path.open("rb") as f:
+            return tomllib.load(f)
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
 
 
 def local_dt(iso: str, tz: ZoneInfo) -> datetime:

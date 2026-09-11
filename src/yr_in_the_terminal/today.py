@@ -1226,15 +1226,34 @@ def build_json_payload(
     }
 
 
+DEFAULT_MIN_HOURS_AHEAD = 12
+
+DEFAULT_CONFIG_TOML = f"""\
+# yr-in-the-terminal settings. Edit values below, then re-run yr.
+
+[today]
+# Minimum hours-ahead to show when --hours is not given (rest of today,
+# but never less than this).
+min_hours = {DEFAULT_MIN_HOURS_AHEAD}
+"""
+
+
+def resolve_hours_ahead(requested: int | None, now: datetime, config: dict) -> int:
+    """Resolve --hours: explicit value wins; otherwise rest-of-today, but never
+    less than a minimum (config: [today] min_hours, default DEFAULT_MIN_HOURS_AHEAD)."""
+    if requested is not None:
+        return requested
+    min_hours = config.get("today", {}).get("min_hours", DEFAULT_MIN_HOURS_AHEAD)
+    return max(24 - now.hour, min_hours)
+
+
 def run(args: argparse.Namespace) -> int:
     global TZ
     try:
         TZ = common.resolve_tz(args.lat, args.lon)
         now = datetime.now(TZ)
 
-        n_hours = args.hours
-        if n_hours is None:
-            n_hours = max(24 - now.hour, 6)
+        n_hours = resolve_hours_ahead(args.hours, now, common.load_config(default_toml=DEFAULT_CONFIG_TOML))
 
         nowcast = build_nowcast(args.lat, args.lon)
         hourly_rows = build_hourly_rows(args.lat, args.lon, n_hours, now)

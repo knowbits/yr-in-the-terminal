@@ -19,7 +19,11 @@ def build_parser() -> argparse.ArgumentParser:
     parent.add_argument("--place", default=DEFAULT_PLACE, help="location label shown in the title")
     parent.add_argument("--no-cache", action="store_true", help="bypass the local response cache")
     parent.add_argument(
-        "--here", action="store_true", help="use IP geolocation for the location (falls back to the default)"
+        "--here",
+        action="store_true",
+        help="use IP geolocation for the location (falls back to the default); "
+        "UNRELIABLE -- accuracy depends heavily on your ISP/mobile broadband provider, "
+        "prefer --location or --lat/--lon when you know where you are",
     )
     parent.add_argument(
         "--location", default=None, help="resolve lat/lon/place from a place name via OpenStreetMap Nominatim"
@@ -35,7 +39,11 @@ def build_parser() -> argparse.ArgumentParser:
         epilog="Example: yr today --hours 12",
     )
     today_p.add_argument(
-        "--hours", type=int, default=None, help="number of hourly rows to show (default: rest of today, min 6)"
+        "--hours",
+        type=int,
+        default=None,
+        help="number of hourly rows to show (default: rest of today, min 12 -- "
+        "configurable via [today].min_hours in the settings file, see README)",
     )
     today_p.add_argument("--json", action="store_true", help="print machine-readable JSON instead of a table")
     today_p.set_defaults(func=today.run)
@@ -75,6 +83,12 @@ def main() -> int:
             args.lat, args.lon, args.place = resolved
     elif not explicit and args.here:
         args.lat, args.lon, args.place = common.resolve_default_location(args.lat, args.lon, args.place)
+        print(
+            "note: --here uses IP-based geolocation, which can be inaccurate "
+            "depending on your ISP/mobile broadband provider -- use --location or "
+            "--lat/--lon instead if this doesn't look right",
+            file=sys.stderr,
+        )
     return args.func(args)
 
 

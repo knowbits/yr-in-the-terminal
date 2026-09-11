@@ -39,7 +39,10 @@ today *args: sync
 forecast *args: sync
     uv run yr forecast {{ args }}
 
-# Symlink the project's own yr entrypoint into ~/.local/bin (idempotent)
+# Symlink the project's own yr entrypoint into ~/.local/bin (idempotent).
+# Shares that path with `uv tool install`/`uvx --from` (see README) -- running
+# either after this one overwrites the symlink to point at an isolated tool
+# venv instead of this checkout; re-run this recipe to point `yr` back here.
 deploy-local: sync
     mkdir -p ~/.local/bin
     ln -sf "$(pwd)/.venv/bin/yr" ~/.local/bin/yr

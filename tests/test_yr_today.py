@@ -113,5 +113,24 @@ class RadarRainRangesTest(unittest.TestCase):
         self.assertIn("Lighter rain continues until 14:05 (~53 min)", headline)
 
 
+class ResolveHoursAheadTest(unittest.TestCase):
+    def test_explicit_value_wins(self) -> None:
+        now = datetime(2026, 9, 7, 10, 0, tzinfo=yr_today.TZ)
+        self.assertEqual(yr_today.resolve_hours_ahead(3, now, {}), 3)
+
+    def test_defaults_to_rest_of_day_when_that_exceeds_the_minimum(self) -> None:
+        now = datetime(2026, 9, 7, 8, 0, tzinfo=yr_today.TZ)  # 16h left in the day
+        self.assertEqual(yr_today.resolve_hours_ahead(None, now, {}), 16)
+
+    def test_defaults_to_the_minimum_late_in_the_day(self) -> None:
+        now = datetime(2026, 9, 7, 22, 0, tzinfo=yr_today.TZ)  # only 2h left
+        self.assertEqual(yr_today.resolve_hours_ahead(None, now, {}), yr_today.DEFAULT_MIN_HOURS_AHEAD)
+
+    def test_config_overrides_the_minimum(self) -> None:
+        now = datetime(2026, 9, 7, 22, 0, tzinfo=yr_today.TZ)
+        config = {"today": {"min_hours": 20}}
+        self.assertEqual(yr_today.resolve_hours_ahead(None, now, config), 20)
+
+
 if __name__ == "__main__":
     unittest.main()

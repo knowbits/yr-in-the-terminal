@@ -101,5 +101,34 @@ class GeocodeTest(unittest.TestCase):
         self.assertIsNone(result)
 
 
+class LoadConfigTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.config_path = Path(self._tmp.name) / "config.toml"
+
+    def test_missing_file_with_no_default_returns_empty_dict(self) -> None:
+        self.assertEqual(common.load_config(self.config_path), {})
+        self.assertFalse(self.config_path.exists())
+
+    def test_missing_file_is_created_from_default_toml(self) -> None:
+        result = common.load_config(self.config_path, default_toml="[today]\nmin_hours = 12\n")
+        self.assertEqual(result, {"today": {"min_hours": 12}})
+        self.assertEqual(self.config_path.read_text(), "[today]\nmin_hours = 12\n")
+
+    def test_existing_file_is_not_overwritten_by_default_toml(self) -> None:
+        self.config_path.write_text("[today]\nmin_hours = 5\n")
+        result = common.load_config(self.config_path, default_toml="[today]\nmin_hours = 12\n")
+        self.assertEqual(result, {"today": {"min_hours": 5}})
+
+    def test_valid_toml_parses(self) -> None:
+        self.config_path.write_text("[today]\nmin_hours = 24\n")
+        self.assertEqual(common.load_config(self.config_path), {"today": {"min_hours": 24}})
+
+    def test_corrupt_toml_returns_empty_dict(self) -> None:
+        self.config_path.write_text("not valid toml {{{")
+        self.assertEqual(common.load_config(self.config_path), {})
+
+
 if __name__ == "__main__":
     unittest.main()
