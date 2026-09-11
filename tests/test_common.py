@@ -95,6 +95,38 @@ class GeocodeTest(unittest.TestCase):
             result = common.geocode("Nonexistentplacexyz123", cache_dir=self.cache_dir)
         self.assertIsNone(result)
 
+    def test_candidates_deduplicates_near_identical_coordinates(self) -> None:
+        # Two OSM entries for the same real-world Oppdal farm (a node and its
+        # farmyard polygon, ~30m apart) plus a genuinely different Sykkylven
+        # place sharing the name -- expect 2 candidates, not 3.
+        results = [
+            {"lat": "62.5874222", "lon": "9.4878556", "display_name": "Toreplassen, Oppdal, Trøndelag, Norge"},
+            {"lat": "62.5874476", "lon": "9.4875781", "display_name": "Toreplassen, Oppdal, Trøndelag, Norge"},
+            {"lat": "62.3863472", "lon": "6.4116530", "display_name": "Toreplassen, Kurset, Hundeidvik, Norge"},
+        ]
+        with mock.patch("urllib.request.urlopen"), mock.patch("json.load", return_value=results):
+            candidates = common.geocode_candidates("Toreplassen", limit=5, cache_dir=self.cache_dir)
+        self.assertEqual(len(candidates), 2)
+        self.assertEqual(candidates[0], (62.5874222, 9.4878556, "Toreplassen, Oppdal"))
+        self.assertEqual(candidates[1], (62.3863472, 6.411653, "Toreplassen, Kurset"))
+
+    def test_candidates_merges_a_municipality_boundary_with_its_village_node(self) -> None:
+        # A common Nominatim pattern: a municipality's administrative boundary
+        # centroid and its village/town node land several km apart for the
+        # same query -- not a genuine ambiguity, must not be reported as one.
+        results = [
+            {"lat": "62.3431", "lon": "6.6090", "display_name": "Sykkylven, Møre og Romsdal, Norge"},
+            {"lat": "62.3929", "lon": "6.5807", "display_name": "Sykkylven, Møre og Romsdal, 6230, Norge"},
+        ]
+        with mock.patch("urllib.request.urlopen"), mock.patch("json.load", return_value=results):
+            candidates = common.geocode_candidates("Sykkylven", limit=5, cache_dir=self.cache_dir)
+        self.assertEqual(len(candidates), 1)
+
+    def test_candidates_empty_on_no_match(self) -> None:
+        with mock.patch("urllib.request.urlopen"), mock.patch("json.load", return_value=[]):
+            candidates = common.geocode_candidates("Nonexistentplacexyz123", cache_dir=self.cache_dir)
+        self.assertEqual(candidates, [])
+
     def test_network_failure_returns_none(self) -> None:
         with mock.patch("urllib.request.urlopen", side_effect=OSError("unreachable")):
             result = common.geocode("Hundeidvik", cache_dir=self.cache_dir)

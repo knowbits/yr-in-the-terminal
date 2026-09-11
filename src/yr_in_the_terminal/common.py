@@ -156,26 +156,53 @@ def resolve_default_location(
         return None
 
 
+# Candidates within this many degrees (lat and lon both) of an already-kept
+# one are treated as the same place, not a genuine ambiguity -- e.g. a
+# municipality's boundary centroid and its village node routinely land a
+# few km apart for the same Nominatim query. ~0.3 deg (~30km) comfortably
+# covers that while still separating genuinely different, same-named places
+# (there can be several "Toreplassen" in Norway, hundreds of km apart).
+_SAME_PLACE_DEGREES = 0.3
+
+
+def geocode_candidates(place: str, *, limit: int = 5, cache_dir: Path | None = None) -> list[tuple[float, float, str]]:
+    """Resolve a place name to up to `limit` (lat, lon, display_name) matches
+    via OpenStreetMap Nominatim, most-relevant first. [] on no match/failure.
+
+    Candidates within _SAME_PLACE_DEGREES of an already-kept one are dropped
+    as the same real-world place under a different OSM entry.
+    """
+    try:
+        results = fetch_json(
+            NOMINATIM_URL, {"q": place, "format": "json", "limit": str(limit)}, ttl=GEOCODE_TTL, cache_dir=cache_dir
+        )
+        candidates: list[tuple[float, float, str]] = []
+        for r in results:
+            lat, lon = float(r["lat"]), float(r["lon"])
+            if any(
+                abs(lat - c_lat) < _SAME_PLACE_DEGREES and abs(lon - c_lon) < _SAME_PLACE_DEGREES
+                for c_lat, c_lon, _ in candidates
+            ):
+                continue
+            # display_name is verbose (e.g. "Voss, Vestland, Norge") -- the
+            # first two comma-separated parts read like a concise
+            # "<place>, <region>" label.
+            label = ", ".join(r["display_name"].split(", ")[:2])
+            candidates.append((lat, lon, label))
+        return candidates
+    except (OSError, ValueError, KeyError, IndexError):
+        return []
+
+
 def geocode(place: str, *, cache_dir: Path | None = None) -> tuple[float, float, str] | None:
-    """Resolve a place name to (lat, lon, display_name) via OpenStreetMap Nominatim.
+    """Resolve a place name to its single best (lat, lon, display_name) match.
 
     Returns None on no match or any failure -- the caller decides the fallback
     (unlike resolve_default_location, this has no single "default" to fall
     back to on its own, since the place name was explicitly requested).
     """
-    try:
-        results = fetch_json(
-            NOMINATIM_URL, {"q": place, "format": "json", "limit": "1"}, ttl=GEOCODE_TTL, cache_dir=cache_dir
-        )
-        if not results:
-            return None
-        r = results[0]
-        # display_name is verbose (e.g. "Voss, Vestland, Norge") -- the first
-        # two comma-separated parts read like a concise "<place>, <region>" label.
-        label = ", ".join(r["display_name"].split(", ")[:2])
-        return float(r["lat"]), float(r["lon"]), label
-    except (OSError, ValueError, KeyError, IndexError):
-        return None
+    candidates = geocode_candidates(place, limit=1, cache_dir=cache_dir)
+    return candidates[0] if candidates else None
 
 
 def resolve_tz(lat: float, lon: float) -> ZoneInfo:

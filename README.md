@@ -20,7 +20,7 @@ No built-in default — pick one:
 | Option | Sets | Notes |
 |---|---|---|
 | `--lat`/`--lon` (`--place` optional) | exact coordinates | works offline; always wins over the others |
-| `--location "<name>"` | geocoded coordinates | via [OpenStreetMap Nominatim](https://nominatim.openstreetmap.org/); needs network |
+| `--location "<name>"` | geocoded coordinates | via [OpenStreetMap Nominatim](https://nominatim.openstreetmap.org/); needs network; ambiguous names (e.g. multiple "Toreplassen" in Norway) list every match instead of guessing -- add a region to disambiguate, e.g. `--location "Toreplassen, Sykkylven"` |
 | `--here` | IP-geolocated coordinates | ⚠️ unreliable, esp. mobile/rural connections |
 | [Settings](#settings) file, `[location]` | your saved default | set once, no flags needed afterward |
 

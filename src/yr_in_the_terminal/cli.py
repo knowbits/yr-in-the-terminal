@@ -25,7 +25,10 @@ def build_parser() -> argparse.ArgumentParser:
         "prefer --location or --lat/--lon when you know where you are",
     )
     parent.add_argument(
-        "--location", default=None, help="resolve lat/lon/place from a place name via OpenStreetMap Nominatim"
+        "--location",
+        default=None,
+        help="resolve lat/lon/place from a place name via OpenStreetMap Nominatim; "
+        "if the name is ambiguous, lists all matches and asks you to be more specific",
     )
 
     ap = argparse.ArgumentParser(description="yr.no (MET Norway) weather forecasts in the terminal.")
@@ -88,11 +91,19 @@ def resolve_location(args: argparse.Namespace, config: dict) -> str | None:
     explicit = args.lat is not None or args.lon is not None
 
     if not explicit and args.location:
-        resolved = common.geocode(args.location)
-        if resolved is None:
+        candidates = common.geocode_candidates(args.location, limit=5)
+        if not candidates:
             print(f"warning: could not resolve --location {args.location!r}", file=sys.stderr)
+        elif len(candidates) == 1:
+            args.lat, args.lon, args.place = candidates[0]
         else:
-            args.lat, args.lon, args.place = resolved
+            listing = "\n".join(f"  {lat:.4f}, {lon:.4f}  {label}" for lat, lon, label in candidates)
+            return (
+                f"error: --location {args.location!r} is ambiguous, {len(candidates)} matches:\n"
+                f"{listing}\n"
+                "Be more specific (e.g. add a region: --location "
+                f'"{args.location}, <region>"), or pass --lat/--lon directly.'
+            )
     elif not explicit and args.here:
         resolved = common.resolve_default_location(loc_cfg.get("lat"), loc_cfg.get("lon"), loc_cfg.get("place"))
         if resolved is None:

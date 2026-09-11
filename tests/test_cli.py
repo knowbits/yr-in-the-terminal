@@ -44,10 +44,25 @@ class ResolveLocationTest(unittest.TestCase):
 
     def test_location_flag_geocodes(self) -> None:
         args = _args(location="Sykkylven")
-        with mock.patch("yr_in_the_terminal.common.geocode", return_value=(1.0, 2.0, "Sykkylven, Norge")):
+        with mock.patch("yr_in_the_terminal.common.geocode_candidates", return_value=[(1.0, 2.0, "Sykkylven, Norge")]):
             error = cli.resolve_location(args, {})
         self.assertIsNone(error)
         self.assertEqual((args.lat, args.lon, args.place), (1.0, 2.0, "Sykkylven, Norge"))
+
+    def test_location_flag_ambiguous_lists_all_candidates(self) -> None:
+        args = _args(location="Toreplassen")
+        candidates = [
+            (62.5874, 9.4879, "Toreplassen, Oppdal"),
+            (62.3863, 6.4117, "Toreplassen, Kurset"),
+        ]
+        with mock.patch("yr_in_the_terminal.common.geocode_candidates", return_value=candidates):
+            error = cli.resolve_location(args, {})
+        self.assertIsNotNone(error)
+        self.assertIn("ambiguous", error)
+        self.assertIn("Toreplassen, Oppdal", error)
+        self.assertIn("Toreplassen, Kurset", error)
+        # Doesn't guess one -- lat/lon stay unset.
+        self.assertIsNone(args.lat)
 
     def test_location_flag_failure_does_not_consult_config(self) -> None:
         args = _args(location="Nonexistentplacexyz123")
@@ -55,7 +70,7 @@ class ResolveLocationTest(unittest.TestCase):
         # --location failing skips straight to the IP-geolocation last resort
         # (not the config's [location]) -- confirm that by making it fail too.
         with (
-            mock.patch("yr_in_the_terminal.common.geocode", return_value=None),
+            mock.patch("yr_in_the_terminal.common.geocode_candidates", return_value=[]),
             mock.patch("yr_in_the_terminal.common.resolve_default_location", return_value=None),
         ):
             error = cli.resolve_location(args, config)
