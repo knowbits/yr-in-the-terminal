@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+*.pyc
+
+# UV / venv
+.venv/
+uv.lock.bak
+
+# Test / lint caches
+.pytest_cache/
+.ruff_cache/
