@@ -335,7 +335,7 @@ def bool_runs(flags: list[bool]) -> list[tuple[int, int]]:
 
 
 BAR_COL_WIDTH = 2
-CHART_GUTTER = 9  # "12.0mm/h " width -- left margin up to the chart's y-axis
+CHART_GUTTER = 5  # "100.0" width -- left margin up to the chart's y-axis
 CHART_ROWS_PER_NOTCH = 4  # character rows between one labelled gridline and the next
 _BLOCKS = " ▁▂▃▄▅▆▇█"  # 0..8 eighths, filled from the row's own floor -- for blend's area fill
 # A radar reading is a point, not a filled area: it needs a thin one-eighth-row
@@ -348,7 +348,7 @@ _BLOCKS = " ▁▂▃▄▅▆▇█"  # 0..8 eighths, filled from the row's own
 # eighth, i.e. index = level - 1 where level is a row-relative offset (see
 # radar_marker below).
 _LINE_EIGHTHS = "▁🭻🭺🭹🭸🭷🭶▔"
-_NICE_SCALES = [0.2, 0.5, 1, 2, 4, 8, 16, 32, 64]
+_NICE_SCALES = [0.2, 0.5, 1, 2, 3, 4, 5, 6, 8, 10, 15, 20, 30, 50, 80, 100]
 
 # How far past the radar-based nowcast window to extend the chart using a
 # smoothed blend toward the hourly model data, and at what step.
@@ -883,6 +883,24 @@ def build_alerts_section(alerts: list[dict]) -> tuple[Text, Group] | None:
 # ---------------------------------------------------------------------------
 
 
+def find_rate_windows(rates: list[float], radar_n: int, threshold: float) -> list[tuple[int, int]]:
+    """Contiguous index ranges within the radar window (indices < radar_n)
+    where rate >= threshold. end == radar_n means the window is still active
+    at the edge of the radar horizon, so its duration isn't known yet."""
+    windows: list[tuple[int, int]] = []
+    start: int | None = None
+    for i in range(radar_n):
+        if rates[i] >= threshold:
+            if start is None:
+                start = i
+        elif start is not None:
+            windows.append((start, i))
+            start = None
+    if start is not None:
+        windows.append((start, radar_n))
+    return windows
+
+
 def rain_headline(combined: dict | None, hourly_rows: list[dict], now: datetime) -> Text:
     if combined is not None:
         times, rates, radar_n = combined["times"], combined["rates"], combined["radar_n"]
@@ -890,6 +908,25 @@ def rain_headline(combined: dict | None, hourly_rows: list[dict], now: datetime)
         if not any(wet):
             hrs = (times[-1] - now).total_seconds() / 3600
             return Text(f"✓ No rain expected in the next ~{hrs:.1f}h.", style="bold green")
+
+        # Any strong-shower burst inside the radar window other than the
+        # current one (index 0, already narrated below if applicable) --
+        # e.g. a burst starting a few minutes out, whether within an
+        # already-wet stretch or one that hasn't started yet.
+        strong_windows = [w for w in find_rate_windows(rates, radar_n, STRONG_SHOWER_RATE_MM_H) if w[0] > 0]
+
+        def add_strong_shower_lines(text: Text) -> Text:
+            for start_idx, end_idx in strong_windows:
+                start_t = times[start_idx]
+                mins = max(0, round((start_t - now).total_seconds() / 60))
+                if end_idx < radar_n:
+                    dur = max(0, round((times[end_idx] - start_t).total_seconds() / 60))
+                    line = f"Strong shower in ~{mins} min, lasting ~{dur} min."
+                else:
+                    line = f"Strong shower in ~{mins} min."
+                text.append(f"\n   {line}", style="white")
+            return text
+
         if wet[0]:
             stop_idx = wet.index(False) if False in wet else None
             if stop_idx is None:
@@ -922,10 +959,10 @@ def rain_headline(combined: dict | None, hourly_rows: list[dict], now: datetime)
                         stop_t = times[stop_idx]
                         approx = "~" if stop_idx >= radar_n else ""
                         stop_mins = max(0, round((stop_t - now).total_seconds() / 60))
-                        continuation = f"Lighter rain continues until {approx}{stop_t:%H:%M} (~{stop_mins} min)."
+                        continuation = f"Lighter rain continues until {approx}{stop_t:%H:%M}, in ~{stop_mins} min."
                     first_line = (
-                        f"🌧️ Strong shower now ({current_rate:.1f} mm/h) — easing by "
-                        f"{strong_end_t:%H:%M} (~{strong_mins} min). {continuation}"
+                        f"🌧️ Strong shower now ({current_rate:.1f} mm/h), easing by "
+                        f"{strong_end_t:%H:%M} (~{strong_mins} min).\n   {continuation}"
                     )
                 else:
                     first_line = (
@@ -946,8 +983,8 @@ def rain_headline(combined: dict | None, hourly_rows: list[dict], now: datetime)
                 hl.append("   Radar forecasted precipitation for the next 2h is ", style="white")
                 hl.append(rate_str, style="green")
                 hl.append(".", style="white")
-                return hl
-            return Text(first_line, style="bold blue")
+                return add_strong_shower_lines(hl)
+            return add_strong_shower_lines(Text(first_line, style="bold blue"))
         start_idx = wet.index(True)
         start_t = times[start_idx]
         mins = max(0, round((start_t - now).total_seconds() / 60))
@@ -976,8 +1013,10 @@ def rain_headline(combined: dict | None, hourly_rows: list[dict], now: datetime)
                 hl.append("   Radar forecasted precipitation for the next 2h is ", style="white")
                 hl.append(rate_str, style="green")
                 hl.append(".", style="white")
-                return hl
-        return Text(f"☔ Rain expected in ~{duration} at around {start_t:%H:%M}{lasting}", style="bold yellow")
+                return add_strong_shower_lines(hl)
+        return add_strong_shower_lines(
+            Text(f"☔ Rain expected in ~{duration} at around {start_t:%H:%M}{lasting}", style="bold yellow")
+        )
 
     # No radar coverage here -- fall back to the coarser hourly figures.
     wet_hours = [(r.get("rain") or 0) >= RAIN_RATE_MM_H for r in hourly_rows]

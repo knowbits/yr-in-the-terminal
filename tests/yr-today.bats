@@ -31,3 +31,10 @@ setup() {
 
     [ "$status" -eq 0 ]
 }
+
+@test "headline flags an upcoming strong burst within ongoing light rain" {
+    run uv run --project "$REPO_ROOT" python "$REPO_ROOT/tests/test_yr_today.py" \
+        RadarRainRangesTest.test_headline_flags_upcoming_strong_burst_within_ongoing_light_rain
+
+    [ "$status" -eq 0 ]
+}

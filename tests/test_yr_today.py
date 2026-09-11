@@ -110,7 +110,33 @@ class RadarRainRangesTest(unittest.TestCase):
 
         self.assertIn("Strong shower now (4.0 mm/h)", headline)
         self.assertIn("easing by 13:15 (~3 min)", headline)
-        self.assertIn("Lighter rain continues until 14:05 (~53 min)", headline)
+        self.assertIn("\n   Lighter rain continues until 14:05, in ~53 min.", headline)
+
+    def test_headline_flags_upcoming_strong_burst_within_ongoing_light_rain(self) -> None:
+        times = [
+            self.now,
+            self.now + timedelta(minutes=5),
+            self.now + timedelta(minutes=10),
+            self.now + timedelta(minutes=15),
+            self.now + timedelta(minutes=20),
+            self.now + timedelta(minutes=25),
+        ]
+        rates = [0.5, 0.5, 4.0, 4.0, 4.0, 0.3]
+        combined = {
+            "times": times,
+            "rates": rates,
+            "rates_hi": rates,
+            "radar_n": len(rates),
+        }
+
+        headline = yr_today.rain_headline(combined, self.rows, self.now).plain
+
+        # Current rate (0.5) is below the strong-shower band, so the first
+        # line is the plain "raining now" case -- but a strong burst starts
+        # 10 min out and lasts 15 min, which is new information the plain
+        # wet/dry run alone wouldn't surface.
+        self.assertNotIn("Strong shower now", headline)
+        self.assertIn("Strong shower in ~10 min, lasting ~15 min.", headline)
 
 
 class ResolveHoursAheadTest(unittest.TestCase):
