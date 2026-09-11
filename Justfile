@@ -5,47 +5,56 @@ default:
     @just --list
 
 # Install/sync the UV-managed virtualenv (incl. dev dependencies)
-sync:
+uv-sync:
     uv sync --all-groups
 
 # Run the ruff linter
-lint: sync
+code-lint: uv-sync
     uv run ruff check src tests
 
 # Auto-format the code
-fmt: sync
+code-fmt: uv-sync
     uv run ruff format src tests
 
 # Check formatting without changing files
-fmt-check: sync
+code-fmt-check: uv-sync
     uv run ruff format --check src tests
 
 # Run the pytest suite
-test: sync
+qa-test: uv-sync
     uv run pytest
 
 # Run the bats behavioural tests
-test-bats: sync
+qa-test-bats: uv-sync
     bats tests/
 
 # Run the full QA suite: lint, format check, unit tests, bats tests
-qa: lint fmt-check test test-bats
+qa: code-lint code-fmt-check qa-test qa-test-bats
 
-# Show today's forecast (pass extra args after --, e.g. `just today -- --hours 12`)
-today *args: sync
+# Show today's forecast (pass extra args after --, e.g. `just yr-today -- --hours 12`)
+yr-today *args: uv-sync
     uv run yr today {{ args }}
 
-# Show the 7-day forecast (pass extra args after --, e.g. `just forecast -- --days 3`)
-forecast *args: sync
+# Show the 7-day forecast (pass extra args after --, e.g. `just yr-forecast -- --days 3`)
+yr-forecast *args: uv-sync
     uv run yr forecast {{ args }}
 
-# Symlink the project's own yr entrypoint into ~/.local/bin (idempotent).
-# Shares that path with `uv tool install`/`uvx --from` (see README) -- running
-# either after this one overwrites the symlink to point at an isolated tool
-# venv instead of this checkout; re-run this recipe to point `yr` back here.
-deploy-local: sync
+# `uv tool install`/`uvx --from` below point ~/.local/bin/yr at an isolated
+# tool venv instead of this checkout -- run this again afterward to undo that.
+# Symlinks ~/.local/bin/yr to this checkout's .venv/bin/yr (idempotent).
+yr-deploy-local: uv-sync
     mkdir -p ~/.local/bin
     ln -sf "$(pwd)/.venv/bin/yr" ~/.local/bin/yr
+
+# Extra args go after --, e.g. `just yr-run-from-git-remote -- --hours 12`.
+# Runs yr via `uv tool run` (uvx), building a fresh throwaway venv from the GitHub repo's master each time -- no install, no local checkout needed.
+yr-run-from-git-remote *args:
+    uvx --from git+https://github.com/knowbits/yr-in-the-terminal.git yr {{ args }}
+
+# Overwrites yr-deploy-local's ~/.local/bin/yr symlink (same PATH slot -- only one of them wins); re-run any time to update to the latest master.
+# Installs yr on PATH via `uv tool install`, building it from the GitHub repo's master (persists, unlike yr-run-from-git-remote's throwaway venv).
+yr-install-from-git-remote:
+    uv tool install --force git+https://github.com/knowbits/yr-in-the-terminal.git
 
 # Remove the virtualenv and caches
 clean:

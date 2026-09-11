@@ -48,15 +48,15 @@ and deps — just `rich`). [just](https://just.systems/) runs the recipes
 below; [mise](https://mise.jdx.dev/) (see `.mise.toml`) pins `uv`/`just`/`bats`.
 
 ```console
-just sync            # create the uv-managed .venv
-just lint             # ruff check
-just fmt-check         # ruff format --check
-just fmt               # ruff format (auto-fix)
-just test              # pytest (tests/)
-just test-bats         # bats behavioural tests (tests/)
+just uv-sync            # create the uv-managed .venv
+just code-lint           # ruff check
+just code-fmt-check       # ruff format --check
+just code-fmt             # ruff format (auto-fix)
+just qa-test             # pytest (tests/)
+just qa-test-bats         # bats behavioural tests (tests/)
 just qa                 # lint + fmt-check + test + test-bats — run this before considering work done
-just today -- --hours 12
-just forecast -- --days 3
+just yr-today -- --hours 12
+just yr-forecast -- --days 3
 ```
 
 Run a single Python test: `uv run pytest tests/test_yr_today.py::RadarRainRangesTest::test_headline_separates_strong_shower_from_lingering_light_rain`

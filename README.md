@@ -171,7 +171,7 @@ command line disables all caching for one run without editing the file.
 $ git clone https://github.com/knowbits/yr-in-the-terminal.git
 $ cd yr-in-the-terminal
 $ uv sync
-$ just deploy-local   # symlinks yr onto PATH
+$ just yr-deploy-local   # symlinks yr onto PATH
 ```
 
 `uv sync` alone is enough to run the tool from the clone without installing
@@ -179,22 +179,22 @@ it anywhere — see [Usage](#usage) above. [mise](https://mise.jdx.dev/) (pins
 `uv`/`just`/`bats` via `.mise.toml`) and [just](https://just.systems/) (runs
 the recipes below) are optional conveniences, mainly useful here.
 
-Note: `deploy-local` and `uv tool install`/`uvx --from` ([Install](#install))
+Note: `yr-deploy-local` and `uv tool install`/`uvx --from` ([Install](#install))
 share the same `~/.local/bin/yr` target — whichever runs last wins. If you
 use both (e.g. testing the end-user install path from a dev checkout),
-re-run `just deploy-local` afterward to point `yr` back at this checkout.
+re-run `just yr-deploy-local` afterward to point `yr` back at this checkout.
 
 ### Recipes
 
 ```console
-$ just sync       # create the UV-managed .venv
+$ just uv-sync    # create the UV-managed .venv
 $ just qa         # lint + format check + pytest + bats
-$ just fmt        # auto-format with ruff
+$ just code-fmt   # auto-format with ruff
 ```
 
 Running from the clone without installing: prefix any command with `uv run`
-(e.g. `uv run yr today --hours 12`), or use `just today -- --hours 12` /
-`just forecast -- --days 3`.
+(e.g. `uv run yr today --hours 12`), or use `just yr-today -- --hours 12` /
+`just yr-forecast -- --days 3`.
 
 ## License
 
