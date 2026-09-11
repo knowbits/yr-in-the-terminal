@@ -10,15 +10,15 @@ sync:
 
 # Run the ruff linter
 lint: sync
-    uv run ruff check .
+    uv run ruff check src tests
 
 # Auto-format the code
 fmt: sync
-    uv run ruff format .
+    uv run ruff format src tests
 
 # Check formatting without changing files
 fmt-check: sync
-    uv run ruff format --check .
+    uv run ruff format --check src tests
 
 # Run the pytest suite
 test: sync

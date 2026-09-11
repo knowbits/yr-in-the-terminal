@@ -1,1 +1,0 @@
-../../COMMON/scripts/detect-ai-cli.sh

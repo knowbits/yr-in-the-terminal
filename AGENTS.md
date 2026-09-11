@@ -34,7 +34,12 @@ exposed as one installed CLI: `yr <command>` (`project.scripts` in
 - `common.py` — shared, stateless helpers (fetch/cache, tz, sun, rounding,
   wind-arrow) used by both subcommands.
 
-Both subcommands default to Hundeidvik, Sykkylven, Norway.
+No built-in default location -- `--lat`/`--lon`, `--location <name>`,
+`--here`, or a `[location]` section in the settings file (see README) sets
+it; if none do, `cli.resolve_location()` falls back to IP geolocation for
+that one run with a loud Rich-panel warning (`_warn_no_location_configured`)
+to configure a real default, and only returns an error if that guess fails
+too (e.g. no network).
 
 ## Commands
 
@@ -123,14 +128,16 @@ Shared conventions across both subcommands:
   everywhere via `common.set_cache_enabled(False)`, called once in
   `cli.main()`. A missing/corrupt cache file or a write failure always falls
   back to a live fetch — never raises.
-- `--location <name>`/`--here` both resolve `--lat`/`--lon`/`--place`
-  automatically, but only when none of those three were explicitly
-  overridden (explicit `--lat`/`--lon`/`--place` always wins); if both are
-  given, `--location` takes priority. `--location` calls
-  `common.geocode()` (OpenStreetMap Nominatim, cached `GEOCODE_TTL` = 30
-  days) and prints a warning + falls back to the default on no match/
-  failure. `--here` calls `common.resolve_default_location()` (one
-  short-timeout IP-geolocation call, ipapi.co) and falls back to the
-  default silently on any failure — and even on success, IP geolocation can
-  land far from the real location on mobile/rural ISPs (the IP's
-  registered block, not the device); `--location` is the reliable choice.
+- `cli.resolve_location()` fills `--lat`/`--lon`/`--place` from
+  `--location`/`--here`/the settings file's `[location]`, in that order,
+  skipped entirely if `--lat`/`--lon` were given explicitly (those always
+  win). `--location` calls `common.geocode()` (OpenStreetMap Nominatim,
+  cached `GEOCODE_TTL` = 30 days); on no match it warns and returns an
+  error (no config fallback within the same call). `--here` calls
+  `common.resolve_default_location()` (one short-timeout IP-geolocation
+  call, ipapi.co), falling back to `[location]`'s lat/lon if IP resolution
+  fails, or `None` if there's no fallback either — and even on success, IP
+  geolocation can land far from the real location on mobile/rural ISPs (the
+  IP's registered block, not the device); `--location` is the reliable
+  choice. If nothing resolves a location at all, `main()` prints an error
+  and returns exit code 1.

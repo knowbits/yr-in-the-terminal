@@ -1,1 +1,0 @@
-../../COMMON/scripts/ast_grep_mcp_server.py

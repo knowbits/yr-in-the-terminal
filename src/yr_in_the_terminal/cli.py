@@ -5,23 +5,22 @@ from __future__ import annotations
 import argparse
 import sys
 
-from yr_in_the_terminal import common, forecast, today
+from rich.console import Console
+from rich.panel import Panel
 
-DEFAULT_LAT = 62.36675
-DEFAULT_LON = 6.42422
-DEFAULT_PLACE = "Hundeidvik, Sykkylven"
+from yr_in_the_terminal import common, forecast, today
 
 
 def build_parser() -> argparse.ArgumentParser:
     parent = argparse.ArgumentParser(add_help=False)
-    parent.add_argument("--lat", type=float, default=DEFAULT_LAT, help="latitude (default Hundeidvik)")
-    parent.add_argument("--lon", type=float, default=DEFAULT_LON, help="longitude (default Hundeidvik)")
-    parent.add_argument("--place", default=DEFAULT_PLACE, help="location label shown in the title")
+    parent.add_argument("--lat", type=float, default=None, help="latitude")
+    parent.add_argument("--lon", type=float, default=None, help="longitude")
+    parent.add_argument("--place", default=None, help="location label shown in the title")
     parent.add_argument("--no-cache", action="store_true", help="bypass the local response cache")
     parent.add_argument(
         "--here",
         action="store_true",
-        help="use IP geolocation for the location (falls back to the default); "
+        help="use IP geolocation for the location; "
         "UNRELIABLE -- accuracy depends heavily on your ISP/mobile broadband provider, "
         "prefer --location or --lat/--lon when you know where you are",
     )
@@ -64,6 +63,68 @@ def build_parser() -> argparse.ArgumentParser:
     return ap
 
 
+def _warn_no_location_configured() -> None:
+    Console(stderr=True).print(
+        Panel(
+            "No location configured -- guessed it from your IP address instead "
+            "(unreliable, especially on mobile/rural connections).\n\n"
+            "Set a real default so you don't need this guess every time:\n"
+            '  yr today --location "Your City"\n'
+            r"or add \[location] lat/lon to the settings file (see README).",
+            title="⚠ No default location set",
+            border_style="red",
+            expand=False,
+        )
+    )
+
+
+def resolve_location(args: argparse.Namespace, config: dict) -> str | None:
+    """Fill in args.lat/lon/place from --location, --here, or the settings
+    file's [location] section, in that order, skipped if --lat/--lon were
+    given explicitly. If none of those give a location either, falls back to
+    IP geolocation (with a loud warning to configure a real default) before
+    giving up. Returns an error message if that also fails, else None."""
+    loc_cfg = config.get("location", {})
+    explicit = args.lat is not None or args.lon is not None
+
+    if not explicit and args.location:
+        resolved = common.geocode(args.location)
+        if resolved is None:
+            print(f"warning: could not resolve --location {args.location!r}", file=sys.stderr)
+        else:
+            args.lat, args.lon, args.place = resolved
+    elif not explicit and args.here:
+        resolved = common.resolve_default_location(loc_cfg.get("lat"), loc_cfg.get("lon"), loc_cfg.get("place"))
+        if resolved is None:
+            print("warning: --here could not determine your location", file=sys.stderr)
+        else:
+            args.lat, args.lon, args.place = resolved
+            print(
+                "note: --here uses IP-based geolocation, which can be inaccurate "
+                "depending on your ISP/mobile broadband provider -- use --location or "
+                "--lat/--lon instead if this doesn't look right",
+                file=sys.stderr,
+            )
+    elif not explicit:
+        args.lat = loc_cfg.get("lat")
+        args.lon = loc_cfg.get("lon")
+        args.place = args.place or loc_cfg.get("place")
+
+    if args.lat is None or args.lon is None:
+        resolved = common.resolve_default_location(None, None, None)
+        if resolved is None:
+            return (
+                "error: no location given -- pass --lat/--lon, --location <name>, or --here, "
+                "or set [location] lat/lon in the settings file (see README)"
+            )
+        args.lat, args.lon, args.place = resolved
+        _warn_no_location_configured()
+
+    if not args.place:
+        args.place = f"{args.lat}, {args.lon}"
+    return None
+
+
 def main() -> int:
     ap = build_parser()
     # argparse subparsers mishandle a bare "--" (a common `just recipe -- --flag`
@@ -74,21 +135,13 @@ def main() -> int:
     argv = [a for a in sys.argv[1:] if a != "--"]
     args = ap.parse_args(argv)
     common.set_cache_enabled(not args.no_cache)
-    explicit = (args.lat, args.lon, args.place) != (DEFAULT_LAT, DEFAULT_LON, DEFAULT_PLACE)
-    if not explicit and args.location:
-        resolved = common.geocode(args.location)
-        if resolved is None:
-            print(f"warning: could not resolve --location {args.location!r}, using default", file=sys.stderr)
-        else:
-            args.lat, args.lon, args.place = resolved
-    elif not explicit and args.here:
-        args.lat, args.lon, args.place = common.resolve_default_location(args.lat, args.lon, args.place)
-        print(
-            "note: --here uses IP-based geolocation, which can be inaccurate "
-            "depending on your ISP/mobile broadband provider -- use --location or "
-            "--lat/--lon instead if this doesn't look right",
-            file=sys.stderr,
-        )
+
+    config = common.load_config(default_toml=common.DEFAULT_CONFIG_TOML)
+    error = resolve_location(args, config)
+    if error:
+        print(error, file=sys.stderr)
+        return 1
+
     return args.func(args)
 
 

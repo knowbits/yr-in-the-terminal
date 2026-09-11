@@ -1,1 +1,0 @@
-../../COMMON/scripts/register-codewhale-guardrail-hook.sh

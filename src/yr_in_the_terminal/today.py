@@ -126,7 +126,7 @@ def get_symbol(code: str | None) -> tuple[str, str]:
 
 
 def format_latlon(lat: float, lon: float) -> str:
-    """Compact degrees + minutes, e.g. (62.36675, 6.42422) -> '62°22'N, 6°25'E'."""
+    """Compact degrees + minutes, e.g. (59.9139, 10.7522) -> '59°55'N, 10°45'E'."""
 
     def dm(value: float, pos: str, neg: str) -> str:
         hemi = pos if value >= 0 else neg
@@ -1226,16 +1226,7 @@ def build_json_payload(
     }
 
 
-DEFAULT_MIN_HOURS_AHEAD = 12
-
-DEFAULT_CONFIG_TOML = f"""\
-# yr-in-the-terminal settings. Edit values below, then re-run yr.
-
-[today]
-# Minimum hours-ahead to show when --hours is not given (rest of today,
-# but never less than this).
-min_hours = {DEFAULT_MIN_HOURS_AHEAD}
-"""
+DEFAULT_MIN_HOURS_AHEAD = common.DEFAULT_MIN_HOURS_AHEAD
 
 
 def resolve_hours_ahead(requested: int | None, now: datetime, config: dict) -> int:
@@ -1253,7 +1244,7 @@ def run(args: argparse.Namespace) -> int:
         TZ = common.resolve_tz(args.lat, args.lon)
         now = datetime.now(TZ)
 
-        n_hours = resolve_hours_ahead(args.hours, now, common.load_config(default_toml=DEFAULT_CONFIG_TOML))
+        n_hours = resolve_hours_ahead(args.hours, now, common.load_config(default_toml=common.DEFAULT_CONFIG_TOML))
 
         nowcast = build_nowcast(args.lat, args.lon)
         hourly_rows = build_hourly_rows(args.lat, args.lon, n_hours, now)

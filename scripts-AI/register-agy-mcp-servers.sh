@@ -1,1 +1,0 @@
-../../COMMON/scripts/register-agy-mcp-servers.sh

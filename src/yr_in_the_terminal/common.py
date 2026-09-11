@@ -83,6 +83,26 @@ def fetch_json(url: str, params: dict[str, str], *, ttl: int = 0, cache_dir: Pat
     return body
 
 
+DEFAULT_MIN_HOURS_AHEAD = 12
+
+DEFAULT_CONFIG_TOML = f"""\
+# yr-in-the-terminal settings. Edit values below, then re-run yr.
+
+[location]
+# Default location used when --lat/--lon, --location, and --here are all
+# omitted on the command line. yr ships with no built-in location -- one of
+# these (a flag, or this section) is required.
+# lat = 59.9139
+# lon = 10.7522
+# place = "Oslo"
+
+[today]
+# Minimum hours-ahead `yr today` shows when --hours is not given (rest of
+# today, but never less than this).
+min_hours = {DEFAULT_MIN_HOURS_AHEAD}
+"""
+
+
 def _default_config_path() -> Path:
     base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
     return Path(base) / "yr-in-the-terminal" / "config.toml"
@@ -117,18 +137,23 @@ def utc_offset_str(d: datetime, tz: ZoneInfo) -> str:
     return f"{sign}{off // 3600:02d}:{(off % 3600) // 60:02d}"
 
 
-def resolve_default_location(lat: float, lon: float, place: str) -> tuple[float, float, str]:
-    """Best-effort IP geolocation for `--here`; always falls back to the given default."""
+def resolve_default_location(
+    lat: float | None, lon: float | None, place: str | None
+) -> tuple[float, float, str] | None:
+    """Best-effort IP geolocation for `--here`; falls back to the given
+    lat/lon/place on failure, or None if there's no fallback to give either."""
     try:
         req = urllib.request.Request("https://ipapi.co/json/", headers={"User-Agent": USER_AGENT})
         with urllib.request.urlopen(req, timeout=3) as resp:
             data = json.load(resp)
         here_lat, here_lon = data["latitude"], data["longitude"]
         city, country = data.get("city"), data.get("country_name")
-        here_place = ", ".join(p for p in (city, country) if p) or place
+        here_place = ", ".join(p for p in (city, country) if p) or place or f"{here_lat}, {here_lon}"
         return float(here_lat), float(here_lon), here_place
     except Exception:
-        return lat, lon, place
+        if lat is not None and lon is not None:
+            return lat, lon, place or f"{lat}, {lon}"
+        return None
 
 
 def geocode(place: str, *, cache_dir: Path | None = None) -> tuple[float, float, str] | None:
@@ -145,9 +170,8 @@ def geocode(place: str, *, cache_dir: Path | None = None) -> tuple[float, float,
         if not results:
             return None
         r = results[0]
-        # display_name is verbose (e.g. "Hundeidvik, Sykkylven, Møre og Romsdal,
-        # 6224, Norge") -- the first two comma-separated parts read like the
-        # existing hand-picked DEFAULT_PLACE ("Hundeidvik, Sykkylven").
+        # display_name is verbose (e.g. "Voss, Vestland, Norge") -- the first
+        # two comma-separated parts read like a concise "<place>, <region>" label.
         label = ", ".join(r["display_name"].split(", ")[:2])
         return float(r["lat"]), float(r["lon"]), label
     except (OSError, ValueError, KeyError, IndexError):

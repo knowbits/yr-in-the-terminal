@@ -17,3 +17,21 @@ uv.lock.bak
 # Temporary files and folders
 
 tmp*
+
+# Personal AI-tooling scaffolding (symlinks into a sibling COMMON repo that
+# only exists on the developer's machine; not meaningful or valid outside
+# it, and not part of the app) -- kept locally, not published.
+.agents/
+.ai-invariants.json
+.ai-workflow.toml
+.claude/
+.codegraph/
+.codex/
+.github/hooks/
+.grok/
+.mcp.json
+.opencode/
+codegraph.json
+docs-AI/
+opencode.json
+scripts-AI/

@@ -2,8 +2,6 @@
 
 Fetches Locationforecast 2.0 (compact) and Sunrise 3.0, aggregates to one row
 per day, and renders a coloured table via Rich.
-
-Default location: Hundeidvik, Sykkylven, Norway.
 """
 
 from __future__ import annotations

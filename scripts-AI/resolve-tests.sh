@@ -1,1 +1,0 @@
-../../COMMON/scripts/resolve-tests.sh

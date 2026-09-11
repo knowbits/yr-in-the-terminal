@@ -1,1 +1,0 @@
-../../COMMON/scripts/register-codex-guardrail-hook.sh

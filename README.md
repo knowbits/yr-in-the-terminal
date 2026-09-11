@@ -7,22 +7,31 @@
 Weather forecasts from [yr.no](https://www.yr.no) (MET Norway) as coloured
 tables and charts, straight in your terminal — no browser, no app.
 
-- **`yr today`** — a detailed view of the rest of today: an hour-by-hour
-  table plus a rain chart for the next ~2 hours at 5-minute resolution, using
-  MET Norway's [Nowcast](https://api.met.no/weatherapi/nowcast/2.0/documentation)
-  radar data (Nordic coverage only) for far more detail than the regular
-  hourly forecast gives; it blends into that hourly forecast beyond the ~2h
-  radar horizon.
-- **`yr forecast`** — a 7-day forecast table (one row per day).
+## Commands
 
-Both default to Hundeidvik, Sykkylven, Norway, and accept `--lat`/`--lon`/
-`--place` for anywhere else, or `--location <name>` to resolve coordinates
-from a place name (via [OpenStreetMap Nominatim](https://nominatim.openstreetmap.org/);
-falls back to the default on no match/failure). Both also accept `--no-cache`
-(bypass the local response cache) and `--json` (print machine-readable JSON
-instead of a table/chart). There's also a `--here` flag (IP geolocation) —
-see `yr today --help` — but it's unreliable on mobile/rural connections;
-`--location`/`--lat`+`--lon` are the ones to reach for.
+- **`yr today`** — hour-by-hour table for the rest of today, plus a
+  short-range rain chart (see [Nowcast radar](#nowcast-radar) below)
+- **`yr forecast`** — 7-day table, one row per day
+
+## Location
+
+No built-in default — pick one:
+
+| Option | Sets | Notes |
+|---|---|---|
+| `--lat`/`--lon` (`--place` optional) | exact coordinates | works offline; always wins over the others |
+| `--location "<name>"` | geocoded coordinates | via [OpenStreetMap Nominatim](https://nominatim.openstreetmap.org/); needs network |
+| `--here` | IP-geolocated coordinates | ⚠️ unreliable, esp. mobile/rural connections |
+| [Settings](#settings) file, `[location]` | your saved default | set once, no flags needed afterward |
+
+Nothing set → `yr` guesses via IP geolocation for that one run, with a
+loud warning to configure a real default (only errors out if that guess
+also fails — e.g. no network).
+
+## Other flags
+
+- `--no-cache` — bypass the local response cache
+- `--json` — machine-readable output instead of a table/chart
 
 ## Install
 
@@ -58,7 +67,65 @@ $ uvx --from git+https://github.com/knowbits/yr-in-the-terminal.git yr today
 uv's tool bin dir, typically `~/.local/bin`) — one command, no separate
 build/symlink step. Re-running it later updates to the latest `master`.
 
-### Manual install (for development)
+## Usage
+
+```console
+$ yr today --location "Oslo"
+$ yr forecast --location "Bergen"
+```
+
+```console
+$ yr today --hours 12
+$ yr forecast --days 3 --exclude-night
+$ yr today --json | jq .
+```
+
+Set a `[location]` default in [Settings](#settings) once, and plain
+`yr today` / `yr forecast` work with no flags.
+
+## Nowcast radar
+
+`yr today`'s rain chart uses MET Norway's
+[Nowcast](https://api.met.no/weatherapi/nowcast/2.0/documentation) radar
+product for its first ~2 hours, blending into the regular hourly forecast
+beyond that:
+
+- **Resolution:** 5-minute samples (vs. hourly for the regular forecast)
+- **Horizon:** ~2 hours ahead only
+- **Coverage:** Nordic region only — outside it, `yr today` silently falls
+  back to hourly-only data
+
+## Settings
+
+File: `$XDG_CONFIG_HOME/yr-in-the-terminal/config.toml`
+(typically `~/.config/yr-in-the-terminal/config.toml` — the standard
+[XDG Base Directory](https://specifications.freedesktop.org/basedir-spec/latest/)
+location for a Linux app's config).
+
+- Auto-created, pre-filled, the first time `yr` doesn't find one
+- Plain [TOML](https://toml.io/) — edit values, re-run `yr`
+- Unreadable/invalid file → silently ignored, built-in defaults used, file
+  left untouched — no way to break `yr` by editing this wrong
+
+```toml
+[location]
+# lat = 59.9139
+# lon = 10.7522
+# place = "Oslo"
+
+[today]
+min_hours = 12
+```
+
+- `[location]` — default coordinates when no `--lat`/`--lon`/`--location`/
+  `--here` flag is given (see [Location](#location)); commented out by
+  default since there's no built-in default
+- `[today].min_hours` — floor for `yr today`'s default row count (`--hours`
+  on the command line always overrides it)
+
+## Development
+
+### Manual install
 
 ```console
 $ git clone https://github.com/knowbits/yr-in-the-terminal.git
@@ -68,53 +135,16 @@ $ just deploy-local   # symlinks yr onto PATH
 ```
 
 `uv sync` alone is enough to run the tool from the clone without installing
-it anywhere — see [Usage](#usage) below. [mise](https://mise.jdx.dev/) (pins
+it anywhere — see [Usage](#usage) above. [mise](https://mise.jdx.dev/) (pins
 `uv`/`just`/`bats` via `.mise.toml`) and [just](https://just.systems/) (runs
-the recipes in this README) are optional conveniences, mainly useful here.
+the recipes below) are optional conveniences, mainly useful here.
 
-Note: `deploy-local` and `uv tool install`/`uvx --from` (above) share the
-same `~/.local/bin/yr` target — whichever runs last wins. If you use both
-(e.g. testing the end-user install path from a dev checkout), re-run `just
-deploy-local` afterward to point `yr` back at this checkout.
+Note: `deploy-local` and `uv tool install`/`uvx --from` ([Install](#install))
+share the same `~/.local/bin/yr` target — whichever runs last wins. If you
+use both (e.g. testing the end-user install path from a dev checkout),
+re-run `just deploy-local` afterward to point `yr` back at this checkout.
 
-## Usage
-
-```console
-$ yr today
-$ yr today --hours 12
-$ yr forecast
-$ yr forecast --days 3
-```
-
-```console
-$ yr forecast --lat 60.10 --lon 9.58 --place "Veggli"
-$ yr today --location "Sykkylven"
-$ yr today --json | jq .
-```
-
-## Settings
-
-`yr today` shows the rest of today by default, but never fewer than 12
-hours ahead — even late in the day, when "rest of today" alone would be
-just an hour or two. That minimum is configurable via a settings file at
-`$XDG_CONFIG_HOME/yr-in-the-terminal/config.toml` (typically
-`~/.config/yr-in-the-terminal/config.toml` — the standard
-[XDG Base Directory](https://specifications.freedesktop.org/basedir-spec/latest/)
-location for a Linux app's own config), which `yr` creates for you,
-pre-filled with the defaults, the first time it doesn't find one:
-
-```toml
-[today]
-min_hours = 12
-```
-
-Edit the value and re-run `yr` to change it. It's plain [TOML](https://toml.io/);
-an unreadable or invalid file is silently ignored (`yr` just uses the
-built-in default without touching or overwriting it), so
-there's no way to break the tool by editing this wrong. `--hours` on the
-command line always overrides it for that one run.
-
-## Development
+### Recipes
 
 ```console
 $ just sync       # create the UV-managed .venv

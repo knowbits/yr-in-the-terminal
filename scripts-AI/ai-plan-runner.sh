@@ -1,1 +1,0 @@
-../../COMMON/scripts/ai-plan-runner.sh

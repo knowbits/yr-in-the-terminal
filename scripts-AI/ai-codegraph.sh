@@ -1,1 +1,0 @@
-../../COMMON/scripts/ai-codegraph.sh
