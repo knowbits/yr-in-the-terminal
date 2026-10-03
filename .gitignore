@@ -35,3 +35,6 @@ codegraph.json
 docs-AI/
 opencode.json
 scripts-AI/
+
+# Local tool artifacts (backups, lockfiles, bytecode)
+*.bak-ensure-mcp-tools-*
