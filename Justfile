@@ -66,12 +66,14 @@ clean:
 # ============================================================================
 
 # Single-file AST structural skeleton (<150 tokens)
+[positional-arguments]
 dev-code-outline FILE *FLAGS: # Run AST structural skeleton outliner on a source file
-    @ai-outline "{{FILE}}" {{FLAGS}}
+    @ai-outline "$@"
 
 # Multi-language structural AST search & pattern query
+[positional-arguments]
 dev-ast-grep PATTERN *FLAGS: # Run structural AST search across repository
-    @ast-grep -p '{{PATTERN}}' {{FLAGS}}
+    @ast-grep -p "$@"
 
 # Slices linter / compiler log into a prioritized <500-byte digest
 dev-qa-digest LOG="tmp-build-output/qa.log": # Emit grouped linter/compiler digest
@@ -86,24 +88,27 @@ dev-test-digest LOG="tmp-build-output/test.log": # Emit test failure digest
 # ============================================================================
 
 # Run a polyglot command through the execution proxy (auto-slices failures)
+[positional-arguments]
 dev-run *CMD: # ai-runner -- <cmd>
-    @ai-runner {{CMD}}
+    @ai-runner "$@"
 
 # Re-run the active failing test from the D.2 runtime-dir active incident
 dev-retest: # ai-runner --retest
     @ai-runner --retest
 
 # Self-verifying AST symbol replacement (validates before writing; real compiler check where available)
+[positional-arguments]
 dev-patch TARGET *FLAGS: # ai-patch <file>:<symbol>
-    @ai-patch "{{TARGET}}" {{FLAGS}}
+    @ai-patch "$@"
 
 # Auto-target and fix the active ai-runner incident
 dev-fix-incident: # ai-patch --fix-incident
     @ai-patch --fix-incident
 
 # Assemble multi-symbol context with 1-hop call-tree windowing
+[positional-arguments]
 dev-pack *TARGETS: # ai-pack <file:symbol> ...
-    @ai-pack {{TARGETS}}
+    @ai-pack "$@"
 
 # Manage the resident ai-daemon cache accelerator
 dev-daemon ACTION="status": # ai-daemon {start|stop|status|restart} --workspace <repo>
@@ -112,7 +117,3 @@ dev-daemon ACTION="status": # ai-daemon {start|stop|status|restart} --workspace 
 # Native sub-millisecond workspace health gate
 dev-doctor: # ai-doctor (falls back to scripts-AI/ai-workflow-doctor.sh)
     @bash scripts-AI/ai-workflow-doctor.sh
-
-# Structural invariant scan (ast-grep) — no-op if repo has no catalog yet
-dev-verify:
-    @test -f sgconfig.yml && ast-grep scan . || echo "dev-verify: no ast-grep catalog configured yet"

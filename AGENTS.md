@@ -1,4 +1,4 @@
-# CLAUDE.md
+# AGENTS.md
 
 ## CRITICAL — Mandatory Common Rules (always in force)
 
