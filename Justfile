@@ -92,7 +92,7 @@ dev-test-digest LOG="tmp-build-output/test.log": # Emit test failure digest
 dev-run *CMD: # ai-runner -- <cmd>
     @ai-runner "$@"
 
-# Re-run the active failing test from the D.2 runtime-dir active incident
+# Re-run the active failing test recorded as the active incident in the runtime dir
 dev-retest: # ai-runner --retest
     @ai-runner --retest
 
