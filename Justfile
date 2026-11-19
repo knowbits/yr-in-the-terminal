@@ -53,8 +53,13 @@ yr-run-from-git-remote *args:
 
 # Overwrites yr-deploy-local's ~/.local/bin/yr symlink (same PATH slot -- only one of them wins); re-run any time to update to the latest master.
 # Installs yr on PATH via `uv tool install`, building it from the GitHub repo's master (persists, unlike yr-run-from-git-remote's throwaway venv).
-yr-install-from-git-remote:
-    uv tool install --force git+https://github.com/knowbits/yr-in-the-terminal.git
+yr-install-from-git-remote *args:
+    ./install-from-github.sh {{ args }}
+
+# Same ~/.local/bin/yr slot as the two recipes above -- last one run wins. Extra args are passed to `uv tool install`, e.g. `just yr-install-from-local --editable`.
+# Installs yr on PATH via `uv tool install`, building a snapshot of this checkout (uncommitted changes included); re-run to pick up later edits.
+yr-install-from-local *args:
+    ./install-from-local.sh {{ args }}
 
 # Remove the virtualenv and caches
 clean:

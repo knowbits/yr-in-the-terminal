@@ -192,6 +192,14 @@ share the same `~/.local/bin/yr` target — whichever runs last wins. If you
 use both (e.g. testing the end-user install path from a dev checkout),
 re-run `just yr-deploy-local` afterward to point `yr` back at this checkout.
 
+Two wrapper scripts in the repo root do the `uv tool install` step for you
+(extra arguments are passed through to `uv tool install`):
+
+```console
+$ ./install-from-github.sh   # latest GitHub master; needs no checkout
+$ ./install-from-local.sh    # snapshot of this working copy (add --editable to track edits live)
+```
+
 ### Recipes
 
 ```console
