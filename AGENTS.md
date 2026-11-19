@@ -21,7 +21,10 @@ exposed as one installed CLI: `yr <command>` (`project.scripts` in
 `pyproject.toml`).
 
 - `cli.py` — argparse entry point (`yr = "yr_in_the_terminal.cli:main"`);
-  dispatches to the two subcommands, both sharing `--lat`/`--lon`/`--place`/
+  dispatches to the two subcommands (`today` is implicit when no command is
+  given -- `yr Lillehammer` = `yr today Lillehammer`, see `normalize_argv`),
+  both sharing an optional positional
+  `LOCATION` (shorthand for `--location`: `yr today "Bergen, USA"`) plus `--lat`/`--lon`/`--place`/
   `--here`/`--location`/`--no-cache`/`--json` on a common parent parser (each
   subcommand adds its own flags — `--hours` for `today`, `--days`/
   `--exclude-night` for `forecast`).
@@ -30,7 +33,7 @@ exposed as one installed CLI: `yr <command>` (`project.scripts` in
   beyond that (Locationforecast 2.0 complete + Nowcast 2.0 + Sunrise 3.0 +
   MET alerts).
 - `forecast.py` — `yr forecast`: 7-day forecast, one row per day
-  (Locationforecast 2.0 compact + Sunrise 3.0).
+  (Locationforecast 2.0 complete + Sunrise 3.0).
 - `common.py` — shared, stateless helpers (fetch/cache, tz, sun, rounding,
   wind-arrow) used by both subcommands.
 

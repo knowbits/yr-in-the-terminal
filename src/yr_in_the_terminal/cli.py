@@ -35,6 +35,17 @@ def _add_shared_options(group: argparse._ArgumentGroup) -> None:
     argparse's own formatter, as the single source of truth for the one
     consolidated `yr --help` screen (there is no separate `yr today --help`/
     `yr forecast --help` display -- see main())."""
+    # Positional shorthand for --location: `yr today Lillehammer` /
+    # `yr forecast "Bergen, USA"`. Optional; its own dest so resolve_location
+    # can tell it apart from the --location flag (for its messages, and to
+    # reject giving both).
+    group.add_argument(
+        "location_arg",
+        metavar="LOCATION",
+        nargs="?",
+        default=None,
+        help=('Place name, optional; same as --location.\nQuote a multi-word name: yr today "Bergen, USA"'),
+    )
     group.add_argument("--lat", type=float, default=None, help="Latitude -- use together with --lon")
     group.add_argument("--lon", type=float, default=None, help="Longitude -- use together with --lat")
     group.add_argument(
@@ -218,15 +229,29 @@ def _print_top_level_help(ap: argparse.ArgumentParser) -> None:
     def example_line(desc: str) -> str:
         return f"  {' ' * _CMD_COL}{desc}"
 
+    # Widest command in the EXAMPLES listing below, plus 2 trailing spaces.
+    example_col = len("yr today --set-location Oslo") + 2
+
+    def usage_example(cmd: str, desc: str) -> str:
+        return f"  [green]{cmd}[/green]{' ' * (example_col - len(cmd))}{desc}"
+
     body = (
         "[blue_violet]DESCRIPTION: yr.no (MET Norway) weather forecasts in the terminal.[/blue_violet]\n\n"
-        "USAGE: [bold green]yr today[/bold green] [OPTIONS]\n"
-        "       [bold green]yr forecast[/bold green] [OPTIONS]\n\n"
+        r"USAGE: [bold green]yr today[/bold green] \[LOCATION] \[OPTIONS]" + "\n"
+        r"       [bold green]yr forecast[/bold green] \[LOCATION] \[OPTIONS]" + "\n"
+        r"       [bold green]yr[/bold green] \[LOCATION] \[OPTIONS]   (same as yr today)" + "\n\n"
         "Two commands:\n\n"
         f"{cmd_line('yr today', 'Hour-by-hour forecast for the rest of today + a rain chart')}\n"
-        f"{example_line('Example: yr today --location "Bergen, Norway"')}\n\n"
-        f"{cmd_line('yr forecast', '7-day forecast, one row per day')}\n"
-        f"{example_line('Example: yr forecast --days 5 --exclude-night')}\n\n"
+        f"{example_line('The default: used when no command is given')}\n\n"
+        f"{cmd_line('yr forecast', '7-day forecast, one row per day')}\n\n"
+        "[bold blue_violet]EXAMPLES:[/bold blue_violet]\n"
+        f"{usage_example('yr', 'Today, at your saved default location')}\n"
+        f"{usage_example('yr Lillehammer', 'Same as: yr today Lillehammer')}\n"
+        f"{usage_example('yr "Bergen, USA"', 'Quote a multi-word place name')}\n"
+        f"{usage_example('yr Oslo --hours 6', 'Options work without a command too')}\n"
+        f"{usage_example('yr forecast', '7 days, at your saved default location')}\n"
+        f"{usage_example('yr forecast Oslo --days 3', '3 days in Oslo')}\n"
+        f"{usage_example('yr today --set-location Oslo', 'Save Oslo as your default location')}\n\n"
         "[bold blue_violet]OPTIONS (shared by both commands):[/bold blue_violet]\n"
         f"{_format_group(today_p, 'shared', inner_width)}\n\n"
         "[bold blue_violet]TODAY-ONLY OPTIONS:[/bold blue_violet]\n"
@@ -251,9 +276,11 @@ NO_LOCATION_ERROR = "__no_location_configured__"
 
 
 def resolve_location(args: argparse.Namespace, config: dict) -> str | None:
-    """Fill in args.lat/lon/place from --location/--set-location, --here, or
-    the settings file's [location] section, in that order, skipped if
-    --lat/--lon were given explicitly. Returns an error message if none of
+    """Fill in args.lat/lon/place from --location/--set-location (or the
+    positional LOCATION, an exact shorthand for --location), --here, or the
+    settings file's [location] section, in that order, skipped if --lat/--lon
+    were given explicitly. A positional LOCATION together with --location/
+    --set-location is rejected as an error rather than silently picking one. Returns an error message if none of
     those resolve a location (or the one that was tried fails), else None --
     there is no silent IP-geolocation fallback for an unconfigured location;
     only --here opts into that explicitly. If nothing at all was given,
@@ -266,13 +293,21 @@ def resolve_location(args: argparse.Namespace, config: dict) -> str | None:
     to set_config_location."""
     loc_cfg = config.get("location", {})
     explicit = args.lat is not None or args.lon is not None
-    location_query = args.set_location or args.location
-    flag = "--set-location" if args.set_location else "--location"
+    if args.location_arg and (args.set_location or args.location):
+        clash = "--set-location" if args.set_location else "--location"
+        return (
+            f"Two locations given: {args.location_arg!r} and {clash} {args.set_location or args.location!r}\n"
+            "Give the place name only once."
+        )
+    location_query = args.set_location or args.location or args.location_arg
+    # `flag` is how the query was given, for messages; "" = the positional.
+    flag = "--set-location" if args.set_location else "--location" if args.location else ""
+    flag_sp = f"{flag} " if flag else ""
 
     if not explicit and location_query:
         candidates = common.geocode_candidates(location_query, limit=5, config=config)
         if not candidates:
-            print(f"warning: could not resolve {flag} {location_query!r}", file=sys.stderr)
+            print(f"warning: could not resolve {flag or 'location'} {location_query!r}", file=sys.stderr)
         elif len(candidates) == 1:
             args.lat, args.lon, args.place = candidates[0]
             if args.set_location:
@@ -284,9 +319,9 @@ def resolve_location(args: argparse.Namespace, config: dict) -> str | None:
             return (
                 f"The {location_query!r} location is ambiguous, found {len(candidates)} matches:\n\n"
                 f"{listing}\n\n"
-                f"Add a region to {flag} to disambiguate\n"
+                f"Add a region to {flag or 'the location'} to disambiguate\n"
                 "Use one of the matched locations above instead, e.g.:\n"
-                f'  [green]yr {args.command} {flag} "{example}"[/green]'
+                f'  [green]yr {args.command} {flag_sp}"{example}"[/green]'
             )
     elif not explicit and args.here:
         resolved = common.resolve_default_location(None, None, None)
@@ -311,13 +346,28 @@ def resolve_location(args: argparse.Namespace, config: dict) -> str | None:
         if not explicit and not location_query and not args.here and not loc_cfg.get("location"):
             return NO_LOCATION_ERROR
         return (
-            "no location given -- pass --lat/--lon, --location <name>, or --here, "
+            "no location given -- pass a place name, --lat/--lon, --location <name>, or --here, "
             r"or set \[location] location in the settings file (see README)"
         )
 
     if not args.place:
         args.place = f"{args.lat}, {args.lon}"
     return None
+
+
+COMMANDS = ("today", "forecast")
+
+
+def normalize_argv(argv: list[str]) -> list[str]:
+    """Drop any bare "--" and make `today` the implicit command: `yr` runs
+    `yr today`, `yr Lillehammer` runs `yr today Lillehammer`, `yr --hours 5`
+    runs `yr today --hours 5`. The top-level parser takes no options of its
+    own, so the command can only ever be the first token -- anything else
+    there (or nothing at all) means it was left out."""
+    argv = [a for a in argv if a != "--"]
+    if not argv or argv[0] not in COMMANDS:
+        argv = ["today", *argv]
+    return argv
 
 
 def main() -> int:
@@ -327,7 +377,7 @@ def main() -> int:
     # its own options, so the leftover tokens bubble back up as "unrecognized
     # arguments" at the top-level parser. This CLI has no positional argument
     # that would ever need a literal "--", so it's safe to just drop it.
-    argv = [a for a in sys.argv[1:] if a != "--"]
+    argv = normalize_argv(sys.argv[1:])
 
     # -h/--help anywhere (bare "yr --help", or after "today"/"forecast") goes
     # to the one consolidated help screen -- there is no separate per-command

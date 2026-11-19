@@ -209,5 +209,46 @@ class SetConfigLocationTest(unittest.TestCase):
         self.assertEqual(config["today"]["min_hours"], 12)
 
 
+class PrecipWordTest(unittest.TestCase):
+    def test_only_snow_codes_give_snow(self) -> None:
+        codes = ["snow", "lightsnowshowers_night", "heavysnow", "cloudy", None]
+        self.assertEqual(common.precip_word(codes, [5.0]), "Snow")
+
+    def test_only_rain_codes_give_rain(self) -> None:
+        codes = ["heavyrainshowers_day", "lightrain", "clearsky_day"]
+        self.assertEqual(common.precip_word(codes, [-5.0]), "Rain")
+
+    def test_both_types_give_rain_slash_snow(self) -> None:
+        self.assertEqual(common.precip_word(["snow", "snow", "snow", "lightrain"], [-5.0]), "Rain/Snow")
+
+    def test_sleet_is_a_mix_so_it_alone_gives_rain_slash_snow(self) -> None:
+        self.assertEqual(common.precip_word(["lightsleet", "cloudy"], [1.0]), "Rain/Snow")
+        self.assertEqual(common.precip_word(["snow", "heavysleetshowers_day"], [-1.0]), "Rain/Snow")
+
+    def test_a_dry_period_falls_back_to_temperature(self) -> None:
+        dry = ["cloudy", "clearsky_day", "fog"]
+        self.assertEqual(common.precip_word(dry, [-3.0, -1.0, None]), "Snow")
+        self.assertEqual(common.precip_word(dry, [0.0]), "Snow")
+        self.assertEqual(common.precip_word(dry, [2.0, 4.0]), "Rain")
+
+    def test_nothing_to_go_by_at_all_gives_rain(self) -> None:
+        self.assertEqual(common.precip_word([], []), "Rain")
+
+
+class SignedTempTest(unittest.TestCase):
+    def test_positive_gets_a_space_not_a_plus_and_negative_keeps_its_minus(self) -> None:
+        self.assertEqual(common.signed_temp(1), " 1")
+        self.assertEqual(common.signed_temp(-5), "-5")
+        self.assertEqual(common.signed_temp(2.74, 1), " 2.7")
+        self.assertEqual(common.signed_temp(-2.74, 1), "-2.7")
+
+    def test_anything_displaying_as_zero_gets_a_space_in_the_sign_slot(self) -> None:
+        self.assertEqual(common.signed_temp(0), " 0")
+        self.assertEqual(common.signed_temp(0.04, 1), " 0.0")
+        self.assertEqual(common.signed_temp(-0.04, 1), " 0.0")
+        # Same width as a signed value, so a column of them aligns.
+        self.assertEqual(len(common.signed_temp(0)), len(common.signed_temp(5)))
+
+
 if __name__ == "__main__":
     unittest.main()

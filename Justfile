@@ -56,8 +56,8 @@ yr-run-from-git-remote *args:
 yr-install-from-git-remote *args:
     ./install-from-github.sh {{ args }}
 
-# Same ~/.local/bin/yr slot as the two recipes above -- last one run wins. Extra args are passed to `uv tool install`, e.g. `just yr-install-from-local --editable`.
-# Installs yr on PATH via `uv tool install`, building a snapshot of this checkout (uncommitted changes included); re-run to pick up later edits.
+# Same ~/.local/bin/yr slot as the two recipes above -- last one run wins. Extra args are passed to `uv tool install`; `just yr-install-from-local --snapshot` installs a frozen copy instead.
+# Installs yr on PATH via `uv tool install`, editable: it runs this checkout's src/ directly, so later edits are live without a re-run.
 yr-install-from-local *args:
     ./install-from-local.sh {{ args }}
 

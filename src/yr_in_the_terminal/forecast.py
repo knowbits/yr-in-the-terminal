@@ -1,6 +1,6 @@
 """7-day weather forecast table from yr.no (MET Norway).
 
-Fetches Locationforecast 2.0 (compact) and Sunrise 3.0, aggregates to one row
+Fetches Locationforecast 2.0 (complete) and Sunrise 3.0, aggregates to one row
 per day, and renders a coloured table via Rich.
 """
 
@@ -21,7 +21,10 @@ from rich.text import Text
 
 from yr_in_the_terminal import common
 
-FORECAST_URL = "https://api.met.no/weatherapi/locationforecast/2.0/compact"
+# "complete" rather than "compact": the only one of the two carrying
+# wind_speed_of_gust (for the "Wind gust" column). Same URL + params as
+# today.py's fetch, so the two commands share one cached response.
+FORECAST_URL = "https://api.met.no/weatherapi/locationforecast/2.0/complete"
 
 TZ = ZoneInfo("Europe/Oslo")
 
@@ -72,6 +75,8 @@ def build_hourly(timeseries: list[dict], tz: ZoneInfo, exclude_night: bool = Fal
                 "wind_max": None,
                 "day_winds": [],
                 "day_wind_dirs": [],
+                "gust_max": None,
+                "gust_last": None,  # local hour of the day's last step carrying a gust value
                 "first": 23,
                 "last": 0,
             },
@@ -92,6 +97,11 @@ def build_hourly(timeseries: list[dict], tz: ZoneInfo, exclude_night: bool = Fal
         if ws is not None and (not exclude_night or t.hour >= 6):
             rec["wind_min"] = ws if rec["wind_min"] is None else min(rec["wind_min"], ws)
             rec["wind_max"] = ws if rec["wind_max"] is None else max(rec["wind_max"], ws)
+        gust = details.get("wind_speed_of_gust")
+        if gust is not None:
+            rec["gust_last"] = t.hour if rec["gust_last"] is None else max(rec["gust_last"], t.hour)
+            if not exclude_night or t.hour >= 6:
+                rec["gust_max"] = gust if rec["gust_max"] is None else max(rec["gust_max"], gust)
         if 10 <= t.hour < 18:
             if ws is not None:
                 rec["day_winds"].append(ws)
@@ -193,6 +203,24 @@ def weather(rec: dict, rain_total: float) -> tuple[str, str]:
     return SYMBOLS["cloudy"]
 
 
+def day_gust(rec: dict) -> int | None:
+    """The day's strongest gust (m/s, rounded), or None when MET's gust data
+    doesn't cover enough of the day to call it that.
+
+    MET only forecasts gusts for the short-range part of the run (roughly the
+    first 2.5 days, the hourly steps); later steps carry no gust value at
+    all. On the day where that coverage runs out, a maximum over just the
+    covered morning would understate the day, so a gust is reported only if
+    the gust values reach at least 18:00 local -- or through the day's own
+    final step, for a day the forecast run itself ends in. No estimate is
+    made for uncovered days: the cell is left blank."""
+    if rec["gust_max"] is None or rec["gust_last"] is None:
+        return None
+    if rec["gust_last"] < 18 and rec["gust_last"] < rec["last"]:
+        return None
+    return common.round_half_up(rec["gust_max"])
+
+
 def build_rows(
     lat: float, lon: float, n_days: int, exclude_night: bool = False, config: dict | None = None
 ) -> list[dict]:
@@ -259,9 +287,36 @@ def build_rows(
                 "wind_max": wind_max,
                 "wind_avg": wind_avg,
                 "wind_dir": wind_dir,
+                "wind_gust": day_gust(rec),
+                "syms": rec["syms"],
             }
         )
     return rows
+
+
+def format_temp_cells(rows: list[dict]) -> list[str]:
+    """The "Temp [avg]" cell text for every row, e.g. "-1, 1 °C [ 1]".
+
+    Each of the three numbers is right-aligned to the widest one in its own
+    position across all rows, so the "," and the "[...]" line up vertically
+    down the column whatever mix of one-/two-digit and positive/negative
+    values a week holds. Positive and zero values carry a space where a minus
+    would be, so they stay the same width as negative ones. "," rather than "–" separates low from
+    high: a dash next to a minus sign ("-8–-4") is hard to read. The unit is
+    given once, after the low,high pair; the bracketed average shares it."""
+    lows = [common.signed_temp(common.round_half_up(r["low"])) for r in rows]
+    highs = [common.signed_temp(common.round_half_up(r["high"])) for r in rows]
+    avgs = [common.signed_temp(r["avg"]) if r["avg"] is not None else None for r in rows]
+    low_w = max((len(v) for v in lows), default=0)
+    high_w = max((len(v) for v in highs), default=0)
+    avg_w = max((len(v) for v in avgs if v is not None), default=0)
+    cells = []
+    for low, high, avg in zip(lows, highs, avgs):
+        cell = f"{low:>{low_w}},{high:>{high_w}} °C"
+        if avg is not None:
+            cell += f" [{avg:>{avg_w}}]"
+        cells.append(cell)
+    return cells
 
 
 def render(rows: list[dict], place: str, exclude_night: bool = False) -> None:
@@ -269,11 +324,18 @@ def render(rows: list[dict], place: str, exclude_night: bool = False) -> None:
     table = Table()
     table.add_column("Day", style="bold")
     table.add_column("Weather")
-    table.add_column(Text("Temp [avg] (°C)"), justify="left")
-    table.add_column("Rain (mm)", justify="right")
-    table.add_column("☔ Rain", justify="left")
-    table.add_column("☀️ Sun", justify="left")
-    table.add_column(Text("Wind [avg] (m/s)"), justify="left")
+    table.add_column(Text("Temp 🌡️ [avg]"), justify="right")
+    # "Rain", "Snow" or "Rain/Snow" in the headers/legend, by what MET expects for these days.
+    precip = common.precip_word(
+        [s for r in rows for s in r.get("syms", [])],
+        [t for r in rows for t in (r["low"], r["high"])],
+    )
+    precip_icon = common.precip_icon(precip)
+    table.add_column(Text(f"{precip} {precip_icon}", justify="left"), justify="right")
+    table.add_column(f"{precip} ⏱️", justify="left")
+    table.add_column("Sun ☀️", justify="left")
+    table.add_column(Text("Wind 💨 [avg]", justify="left"), justify="right")
+    table.add_column(Text("Wind gust 🌊", justify="left"), justify="right")
 
     def time_cell(runs: list[tuple[int, int]]) -> Text:
         if not runs:
@@ -287,29 +349,28 @@ def render(rows: list[dict], place: str, exclude_night: bool = False) -> None:
     def wind_cell(r: dict) -> Text:
         if r["wind_min"] is None or r["wind_max"] is None:
             return Text("")
-        txt = Text(f"{r['wind_min']} – {r['wind_max']}")
+        txt = Text(f"{r['wind_min']}–{r['wind_max']} m/s")
         if r["wind_avg"] is not None:
-            txt.append(f" [{r['wind_avg']} {r['wind_dir']}]")
+            txt.append(f" [{r['wind_avg']}]")
+        if r["wind_avg"] is not None and r["wind_dir"]:
+            txt.append(f" {r['wind_dir']}")
         return txt
 
+    temp_cells = format_temp_cells(rows)
     partial_days = []
-    for r in rows:
+    for i, r in enumerate(rows):
         day = f"{r['date']:%a} {r['date'].day:>2}"
         if r["partial"]:
             partial_days.append(day)
-        low = common.round_half_up(r["low"])
-        high = common.round_half_up(r["high"])
-        temp = f"{low:>2d}°–{high:>2d}°"
-        if r["avg"] is not None:
-            temp += f" [{r['avg']:>2d}°]"
         table.add_row(
             day + ("*" if r["partial"] else ""),
             f"{r['emoji']} {r['label']}",
-            temp,
-            f"{r['rain']:.1f}mm" if r["rain"] > 0 else "",
+            temp_cells[i],
+            f"{r['rain']:.1f} mm" if r["rain"] >= 0.05 else "",
             time_cell(r["rain_iv"]),
             time_cell(r["sun_iv"]),
             wind_cell(r),
+            f"{r['wind_gust']} m/s" if r["wind_gust"] is not None else "",
         )
 
     header = Text()
@@ -322,13 +383,19 @@ def render(rows: list[dict], place: str, exclude_night: bool = False) -> None:
     console.print(header)
     console.print(table)
     console.print(Text("[avg]: the average day temperature between 10.00 to 18.00", style="bright_black"))
+    console.print(
+        Text(
+            "Wind gust: strongest gust. Yr/MET only has gust data for the first ~2.5 days.",
+            style="bright_black",
+        )
+    )
     if partial_days:
         console.print(
             f"[bright_black]* {', '.join(partial_days)}: partial day — forecast run "
             "does not cover the full 24 h.[/bright_black]"
         )
     console.print(
-        "[bright_black]Rain/Sun time: contiguous hours; "
+        f"[bright_black]{precip} and Sun time: contiguous hours; "
         "Sun = daylight hours with cloud cover < "
         f"{common.SUN_CLOUD_PCT}%.[/bright_black]"
     )
@@ -355,6 +422,7 @@ def build_json_payload(rows: list[dict], place: str, lat: float, lon: float) -> 
                 "wind_max_ms": r["wind_max"],
                 "wind_avg_ms": r["wind_avg"],
                 "wind_dir": r["wind_dir"],
+                "wind_gust_ms": r["wind_gust"],
             }
             for r in rows
         ],

@@ -10,10 +10,17 @@ from yr_in_the_terminal import cli
 
 
 def _args(
-    lat=None, lon=None, place=None, location=None, set_location=None, here=False, command="today"
+    lat=None, lon=None, place=None, location=None, set_location=None, here=False, command="today", location_arg=None
 ) -> argparse.Namespace:
     return argparse.Namespace(
-        lat=lat, lon=lon, place=place, location=location, set_location=set_location, here=here, command=command
+        lat=lat,
+        lon=lon,
+        place=place,
+        location=location,
+        set_location=set_location,
+        here=here,
+        command=command,
+        location_arg=location_arg,
     )
 
 
@@ -44,6 +51,36 @@ class ResolveLocationTest(unittest.TestCase):
             error = cli.resolve_location(args, {})
         self.assertIsNone(error)
         self.assertEqual((args.lat, args.lon, args.place), (1.0, 2.0, "Sykkylven, Norge"))
+
+    def test_positional_location_geocodes_like_the_flag(self) -> None:
+        args = cli.build_parser().parse_args(["forecast", "Bergen, USA", "--days", "3"])
+        self.assertEqual(args.location_arg, "Bergen, USA")
+        with mock.patch(
+            "yr_in_the_terminal.common.geocode_candidates", return_value=[(1.0, 2.0, "Bergen, USA")]
+        ) as candidates:
+            error = cli.resolve_location(args, {"location": {"location": "Configured Place"}})
+        self.assertIsNone(error)
+        self.assertEqual(candidates.call_args.args[0], "Bergen, USA")
+        self.assertEqual((args.lat, args.lon, args.place), (1.0, 2.0, "Bergen, USA"))
+
+    def test_positional_location_is_optional(self) -> None:
+        args = cli.build_parser().parse_args(["today", "--hours", "5"])
+        self.assertIsNone(args.location_arg)
+
+    def test_positional_location_ambiguous_suggests_the_positional_form(self) -> None:
+        args = _args(location_arg="Toreplassen")
+        matches = [(1.0, 2.0, "Toreplassen, A"), (3.0, 4.0, "Toreplassen, B")]
+        with mock.patch("yr_in_the_terminal.common.geocode_candidates", return_value=matches):
+            error = cli.resolve_location(args, {})
+        self.assertIn('yr today "Toreplassen, A"', error)
+        self.assertNotIn("--location", error)
+
+    def test_positional_location_plus_location_flag_is_an_error(self) -> None:
+        args = _args(location_arg="Oslo", location="Bergen")
+        with mock.patch("yr_in_the_terminal.common.geocode_candidates") as candidates:
+            error = cli.resolve_location(args, {})
+        self.assertIn("Two locations given", error)
+        candidates.assert_not_called()
 
     def test_location_flag_ambiguous_lists_all_candidates(self) -> None:
         args = _args(location="Toreplassen")
@@ -142,6 +179,23 @@ class ResolveLocationTest(unittest.TestCase):
         ):
             cli.resolve_location(args, {})
         set_location.assert_not_called()
+
+
+class NormalizeArgvTest(unittest.TestCase):
+    def test_bare_yr_runs_today(self) -> None:
+        self.assertEqual(cli.normalize_argv([]), ["today"])
+
+    def test_location_without_a_command_runs_today(self) -> None:
+        self.assertEqual(cli.normalize_argv(["Lillehammer"]), ["today", "Lillehammer"])
+        args = cli.build_parser().parse_args(cli.normalize_argv(["Bergen, USA", "--hours", "5"]))
+        self.assertEqual((args.command, args.location_arg, args.hours), ("today", "Bergen, USA", 5))
+
+    def test_options_without_a_command_run_today(self) -> None:
+        self.assertEqual(cli.normalize_argv(["--hours", "5"]), ["today", "--hours", "5"])
+
+    def test_explicit_commands_are_left_alone(self) -> None:
+        self.assertEqual(cli.normalize_argv(["forecast", "Oslo"]), ["forecast", "Oslo"])
+        self.assertEqual(cli.normalize_argv(["today", "--", "--hours", "5"]), ["today", "--hours", "5"])
 
 
 class AddBorderTest(unittest.TestCase):

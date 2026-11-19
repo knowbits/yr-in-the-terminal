@@ -8,12 +8,14 @@ from yr_in_the_terminal import forecast as yr_forecast
 
 
 def _point(iso_time: str, temp: float, **extra: object) -> dict:
-    """Build one Locationforecast compact timeseries entry."""
+    """Build one Locationforecast timeseries entry."""
     details: dict = {"air_temperature": temp}
     if "wind_speed" in extra:
         details["wind_speed"] = extra["wind_speed"]
     if "wind_from_direction" in extra:
         details["wind_from_direction"] = extra["wind_from_direction"]
+    if "wind_speed_of_gust" in extra:
+        details["wind_speed_of_gust"] = extra["wind_speed_of_gust"]
     if "cloud_area_fraction" in extra:
         details["cloud_area_fraction"] = extra["cloud_area_fraction"]
     data: dict = {"instant": {"details": details}}
@@ -87,6 +89,50 @@ class BuildHourlyTest(unittest.TestCase):
         # Only the local-14:00 point (hour >= 6) contributes when exclude_night is set.
         self.assertEqual(rec["min"], 15.0)
         self.assertEqual(rec["max"], 15.0)
+
+
+class DayGustTest(unittest.TestCase):
+    def _rec(self, timeseries: list[dict], **kwargs: bool) -> dict:
+        _precip, _cloud, meta = yr_forecast.build_hourly(timeseries, yr_forecast.TZ, **kwargs)
+        return meta[common.local_dt(timeseries[0]["time"], yr_forecast.TZ).date()]
+
+    def test_reports_the_strongest_gust_of_a_fully_covered_day(self) -> None:
+        rec = self._rec(
+            [
+                _point("2026-09-07T04:00:00Z", 5.0, wind_speed_of_gust=4.2),  # local 06:00
+                _point("2026-09-07T12:00:00Z", 9.0, wind_speed_of_gust=11.6),  # local 14:00
+                _point("2026-09-07T17:00:00Z", 7.0, wind_speed_of_gust=6.0),  # local 19:00
+            ]
+        )
+        self.assertEqual(yr_forecast.day_gust(rec), 12)
+
+    def test_blank_when_gust_coverage_ends_before_the_evening(self) -> None:
+        # Gust data stops at local 10:00 but the day's forecast runs on to
+        # 20:00 -- a morning-only maximum would understate the day.
+        rec = self._rec(
+            [
+                _point("2026-09-07T08:00:00Z", 5.0, wind_speed_of_gust=8.0),  # local 10:00
+                _point("2026-09-07T18:00:00Z", 5.0),  # local 20:00, no gust value
+            ]
+        )
+        self.assertIsNone(yr_forecast.day_gust(rec))
+
+    def test_blank_when_the_day_has_no_gust_values_at_all(self) -> None:
+        rec = self._rec([_point("2026-09-07T12:00:00Z", 5.0)])
+        self.assertIsNone(yr_forecast.day_gust(rec))
+
+    def test_reported_when_gusts_cover_a_day_through_its_own_last_step(self) -> None:
+        # The forecast run itself ends at local 14:00; gusts cover all of it.
+        rec = self._rec([_point("2026-09-07T12:00:00Z", 5.0, wind_speed_of_gust=8.0)])
+        self.assertEqual(yr_forecast.day_gust(rec), 8)
+
+    def test_exclude_night_ignores_pre_6am_gusts(self) -> None:
+        timeseries = [
+            _point("2026-09-07T01:00:00Z", 5.0, wind_speed_of_gust=20.0),  # local 03:00
+            _point("2026-09-07T17:00:00Z", 5.0, wind_speed_of_gust=6.0),  # local 19:00
+        ]
+        self.assertEqual(yr_forecast.day_gust(self._rec(timeseries, exclude_night=True)), 6)
+        self.assertEqual(yr_forecast.day_gust(self._rec(timeseries)), 20)
 
 
 class IntervalsTest(unittest.TestCase):
@@ -174,6 +220,28 @@ class WeatherTest(unittest.TestCase):
     def test_dry_day_falls_back_to_cloudy_when_no_symbols_present(self) -> None:
         rec = self._rec()
         self.assertEqual(yr_forecast.weather(rec, rain_total=0.0), yr_forecast.SYMBOLS["cloudy"])
+
+
+class FormatTempCellsTest(unittest.TestCase):
+    @staticmethod
+    def _row(low: float, high: float, avg: int | None) -> dict:
+        return {"low": low, "high": high, "avg": avg}
+
+    def test_positive_values_get_a_sign_slot_space_so_the_comma_aligns(self) -> None:
+        cells = yr_forecast.format_temp_cells([self._row(-1, 1, 1), self._row(-5, -1, -1)])
+        self.assertEqual(cells, ["-1, 1 °C [ 1]", "-5,-1 °C [-1]"])
+
+    def test_mixed_widths_are_right_aligned_per_position(self) -> None:
+        cells = yr_forecast.format_temp_cells([self._row(-12, 0, -3), self._row(4, 11, 9), self._row(0, 2, None)])
+        self.assertEqual(cells, ["-12,  0 °C [-3]", "  4, 11 °C [ 9]", "  0,  2 °C"])
+        self.assertEqual(len({c.index(",") for c in cells}), 1)
+
+    def test_zero_is_padded_like_a_signed_value_even_when_every_row_is_zero(self) -> None:
+        cells = yr_forecast.format_temp_cells([self._row(0, 0, 0), self._row(0.2, -0.3, 0)])
+        self.assertEqual(cells, [" 0, 0 °C [ 0]", " 0, 0 °C [ 0]"])
+
+    def test_no_rows(self) -> None:
+        self.assertEqual(yr_forecast.format_temp_cells([]), [])
 
 
 if __name__ == "__main__":

@@ -13,6 +13,13 @@ tables and charts, straight in your terminal — no browser, no app.
   short-range rain chart (see [Nowcast radar](#nowcast-radar) below)
 - **`yr forecast`** — 7-day table, one row per day
 
+`today` is the default: with no command, `yr` runs `yr today`, so
+`yr Lillehammer` is the same as `yr today Lillehammer` and `yr --hours 6`
+the same as `yr today --hours 6`. Anything other than `today`/`forecast` as
+the first word is read as a place name.
+
+`yr --help` shows every option and a list of examples on one screen.
+
 ## Options
 
 ### Location
@@ -22,10 +29,15 @@ Shared by both commands. No built-in default — pick one:
 | Option | Sets | Notes |
 |---|---|---|
 | `--lat`/`--lon` (`--place` optional) | exact coordinates | works offline; always wins over the others |
+| `<name>` (positional) | geocoded coordinates, for this run only | shorthand for `--location`: `yr today Lillehammer`, `yr forecast "Bergen, USA"` -- quote a multi-word name; can't be combined with `--location`/`--set-location` |
 | `--location "<name>"` | geocoded coordinates, for this run only | via [OpenStreetMap Nominatim](https://nominatim.openstreetmap.org/); needs network; ambiguous names (e.g. multiple "Toreplassen" in Norway) list every match instead of guessing -- add a region to disambiguate, e.g. `--location "Toreplassen, Sykkylven"` |
 | `--set-location "<name>"` | geocoded coordinates, and saves it | like `--location`, but also writes the resolved place to the [Settings](#settings) file's `[location]` default -- an ambiguous or failed lookup saves nothing |
 | `--here` | IP-geolocated coordinates | ⚠️ unreliable, esp. mobile/rural connections; never saved -- `--set-location` is the way to set a persistent default |
 | [Settings](#settings) file, `[location]` | your saved default | set once via `--set-location`, no flags needed afterward |
+
+A place name is looked up the same way whether it's positional or given via
+`--location`; an ambiguous one (e.g. `"Bergen, USA"`, which matches several
+US towns) lists the matches and suggests a more specific name to use instead.
 
 Nothing set → `yr` fails hard with an error (no forecast is shown) — there's
 no silent IP-geolocation guess; pass `--here` explicitly to opt into that.
@@ -87,18 +99,59 @@ build/symlink step. Re-running it later updates to the latest `master`.
 ## Usage
 
 ```console
-$ yr today --location "Oslo"
-$ yr forecast --location "Bergen"
+$ yr                                # no command = yr today
+$ yr Lillehammer                    # = yr today Lillehammer
+$ yr today Lillehammer
+$ yr forecast "Bergen, USA"
+$ yr today --location "Oslo"        # same thing, as a flag
+$ yr today --set-location "Oslo"    # ...and save it as your default
 ```
 
 ```console
-$ yr today --hours 12
-$ yr forecast --days 3 --exclude-night
+$ yr Oslo --hours 12                # options work without a command too
+$ yr forecast Oslo --days 3 --exclude-night
 $ yr today --json | jq .
 ```
 
-Set a `[location]` default in [Settings](#settings) once, and plain
-`yr today` / `yr forecast` work with no flags.
+Save a default once (`--set-location`, or `[location]` in
+[Settings](#settings)), and plain `yr` / `yr forecast` work with no
+arguments.
+
+## Reading the tables
+
+- **Temperatures** show a minus below zero and no `+` above it: `11°`,
+  `-3°`, `0°`. In the tables, positive and zero values are padded with a
+  space where the minus would be, so columns line up.
+- **`yr forecast`'s Temp column** reads `low,high [avg]`, e.g.
+  `-2, 1 °C [ 0]`. A comma separates low from high (a dash next to a minus
+  sign is hard to read), and the numbers are padded so the comma and the
+  `[avg]` bracket line up down the column.
+- **`yr forecast`'s Wind column** reads `min–max [avg] direction`, e.g.
+  `1–3 m/s [2] ↗`.
+- **`yr forecast`'s Wind gust column** shows the day's strongest gust,
+  e.g. `8 m/s`. MET's data set only carries gust values for roughly the first
+  2.5 days, so later days are blank — and so is the day where the gust data
+  runs out before 18:00, since a morning-only maximum would understate it.
+- **`yr today`'s Wind column** reads `speed [gust] direction`, e.g.
+  `2 m/s [4] ↗`. The bracketed number is the gust speed, shown only when it is
+  more than 1 m/s above the wind speed.
+- **`yr today`'s Rain ☔ [starts at] column** reads `amount [↦ lead time]`,
+  e.g. `0.0–0.2 mm [↦ 68 min]`: the bracket appears on the row where a
+  shower starts and says how many minutes from now (`[↦ now]` if it is
+  starting).
+- **Rain or Snow in the headers:** the precipitation columns are headed
+  `Rain …`, `Snow …` or `Rain/Snow …` (e.g. `Snow ❄️`, `Snow ⏱️`,
+  `Snow ❄️ [starts at]`, `Snow %`) depending on MET's weather symbols for the
+  period shown: only rain-type symbols give `Rain`, only snow-type ones
+  `Snow`, and both — or any sleet, which is a mix — `Rain/Snow`. A dry
+  period follows the temperature: `Snow` at or below 0 °C, else `Rain`.
+  The amounts are always millimetres of water, also for snow.
+- **Dry hours stay blank** in `yr today`: the `Rain` cell is empty
+  rather than `0.0 mm`, and the `Rain %` cell empty rather than `0%`. A range
+  that starts at zero (`0.0–0.3 mm`) is still shown.
+- **Units** sit in the cells (`11.1 mm`, `2 m/s`), not in the column
+  headers, for the rain and wind columns.
+- `--json` output is unaffected by any of this — it carries plain numbers.
 
 ## Nowcast radar
 
@@ -146,7 +199,7 @@ geocode_ttl = 2592000
 ```
 
 - `[location]` — default place (geocoded the same way `--location` resolves
-  one) when no `--lat`/`--lon`/`--location`/`--here` flag is given (see
+  one) when no place name or `--lat`/`--lon`/`--location`/`--here` flag is given (see
   [Location](#location)); commented out by default since there's no
   built-in default (shown active above as an example). Set it with
   `yr <command> --set-location "<name>"` rather than by hand
@@ -166,7 +219,7 @@ consumers to cache responses rather than hit the API on every run.
 | `forecast_ttl` | 2700 (45 min) | `yr today` + `yr forecast` | Locationforecast — the hourly model, which itself only updates roughly hourly |
 | `nowcast_ttl` | 300 (5 min) | `yr today` | Nowcast radar — MET issues a new 5-minute radar frame at that same cadence, so this doesn't add staleness beyond the data's own resolution |
 | `alerts_ttl` | 1200 (20 min) | `yr today` | MET weather alerts |
-| `geocode_ttl` | 2592000 (30 days) | `--location` (both commands) | Place-name → coordinates lookups; a place's coordinates don't change |
+| `geocode_ttl` | 2592000 (30 days) | place names -- positional or `--location` (both commands) | Place-name → coordinates lookups; a place's coordinates don't change |
 
 Set any of them to `0` to always fetch that source live. `--no-cache` on the
 command line disables all caching for one run without editing the file.
@@ -196,9 +249,17 @@ Two wrapper scripts in the repo root do the `uv tool install` step for you
 (extra arguments are passed through to `uv tool install`):
 
 ```console
-$ ./install-from-github.sh   # latest GitHub master; needs no checkout
-$ ./install-from-local.sh    # snapshot of this working copy (add --editable to track edits live)
+$ ./install-from-github.sh          # latest GitHub master; needs no checkout
+$ ./install-from-local.sh           # editable install of this checkout
+$ ./install-from-local.sh --snapshot  # frozen copy of this checkout instead
 ```
+
+`install-from-local.sh` installs editable by default: the installed `yr`
+runs this checkout's `src/` directly, so source edits are live at once.
+Re-run it only after a `pyproject.toml` change (a new dependency or entry
+point); moving or deleting the checkout breaks the install. `--snapshot`
+installs an independent copy instead, which needs a re-run to pick up later
+edits.
 
 ### Recipes
 

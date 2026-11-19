@@ -212,11 +212,13 @@ def render_hourly_table(
     table = Table(box=box.ROUNDED, border_style="bright_black", pad_edge=False)
     table.add_column("Hour", style="bold")
     table.add_column("Weather", no_wrap=True)
-    table.add_column("Temp", justify="right", no_wrap=True)
-    table.add_column("Sun", justify="center")
-    table.add_column("Rain (mm)", justify="right")
-    table.add_column("Rain %", justify="right")
-    table.add_column("Wind (m/s)", no_wrap=True)
+    table.add_column("Temp 🌡️", justify="right", no_wrap=True)
+    table.add_column("Sun ☀️", justify="center")
+    # "Rain", "Snow" or "Rain/Snow" in the headers/legend, by what MET expects for these rows.
+    precip = common.precip_word([r["symbol"] for r in rows], [r["temp"] for r in rows])
+    table.add_column(Text(f"{precip} {common.precip_icon(precip)} [starts at]"), justify="left")
+    table.add_column(f"{precip} %", justify="right")
+    table.add_column(Text("Wind 💨 [gust]", justify="left"), justify="right", no_wrap=True)
 
     for i, r in enumerate(rows):
         emoji, label = get_symbol(r["symbol"])
@@ -224,7 +226,7 @@ def render_hourly_table(
         row_style = "bold" if near else None
         hour_cell = f"{r['time']:%H:%M}"
 
-        temp = f"{common.round_half_up(r['temp']):>3d}°" if r["temp"] is not None else ""
+        temp = f"{common.signed_temp(common.round_half_up(r['temp'])):>3}°" if r["temp"] is not None else ""
 
         radar_range = radar_rain_ranges.get(i) if radar_rain_ranges else None
         if radar_range is not None:
@@ -241,24 +243,32 @@ def render_hourly_table(
             rain = f"{r['rain']:.1f}" if r["rain"] and r["rain"] > 0 else ""
             if r["rain_max"] is not None and r["rain_max"] > rain_val:
                 rain += f"–{r['rain_max']:.1f}" if rain else f"0.0–{r['rain_max']:.1f}"
-        # One line, always -- the lead-time marker (if any) prefixes the mm
-        # range rather than wrapping onto its own row.
-        rain_cell = Text(justify="right")
-        if i in showers:
-            rain_cell.append(showers[i] + (" " if rain else ""), style="bold cyan")
+        # A dry row stays blank: nothing that displays as plain 0.0 (incl. a
+        # sub-0.05 amount rounding down to it) is printed.  A real range
+        # starting at zero ("0.0–0.3") is kept.
+        if rain in ("0.0", "0.0–0.0"):
+            rain = ""
+        # One line, always -- the lead-time marker (if any) follows the mm
+        # range ("0.0–0.2 mm [↦ 68 min]") rather than wrapping onto its own row.
+        rain_cell = Text(justify="left")
         if rain:
-            rain_cell.append(rain, style=_bar_color(rain_val))
+            rain_cell.append(f"{rain} mm", style=_bar_color(rain_val))
+        if i in showers:
+            rain_cell.append((" " if rain else "") + f"[{showers[i]}]", style="bold cyan")
 
-        pop = f"{common.round_half_up(r['pop'])}%" if r["pop"] is not None else ""
+        # Blank when it would display as 0% (incl. a sub-0.5 value rounding
+        # down to it) -- same as a dry row's blank "Rain" cell.
+        pop_pct = common.round_half_up(r["pop"]) if r["pop"] is not None else 0
+        pop = f"{pop_pct}%" if pop_pct > 0 else ""
         pop_cell = Text(pop, style=_pop_style(r["pop"]), justify="right")
 
         sun_cell = "☀️" if is_sunny_hour(r, sun) else ""
 
         wind = ""
         if r["wind_speed"] is not None:
-            wind = f"{r['wind_speed']:.0f}"
+            wind = f"{r['wind_speed']:.0f} m/s"
             if r["wind_gust"] is not None and r["wind_gust"] > r["wind_speed"] + 1:
-                wind += f" ({r['wind_gust']:.0f})"
+                wind += f" [{r['wind_gust']:.0f}]"
             if r["wind_dir"] is not None:
                 wind += f" {common.wind_arrow(r['wind_dir'])}"
 
@@ -276,7 +286,7 @@ def render_hourly_table(
     console.print(table)
     console.print(
         Text(
-            "Rain % = chance of any rain that hour",
+            f"{precip} % = chance of any {precip.lower()} that hour",
             style="bright_black",
         )
     )
@@ -768,8 +778,8 @@ def build_combined_rain(nowcast: dict | None, hourly_rows: list[dict]) -> dict |
 def match_showers_to_hours(hourly_rows: list[dict], combined: dict | None, now: datetime) -> dict[int, str]:
     """Map radar/blend-detected rain runs onto the hourly rows they fall in.
 
-    Surfaces a compact lead-time marker, e.g. "(🕐 2h00m)", alongside the
-    "Rain (mm)" figure on the one row where the shower actually starts --
+    Surfaces a compact lead-time marker, e.g. "↦ 68 min", after the
+    "Rain" figure on the one row where the shower actually starts --
     always shown there, one line, never suppressed by whatever the coarse
     hourly total happens to say. Only the start row gets it (not every row
     a multi-hour run happens to overlap), so a long rain spell doesn't
@@ -786,8 +796,8 @@ def match_showers_to_hours(hourly_rows: list[dict], combined: dict | None, now: 
         if lead_min <= 2:
             note = "↦ now"
         else:
-            h, m = divmod(max(0, lead_min), 60)
-            note = f"↦ {h}h{m:02d}m" if h else f"↦ {m}m"
+            # Whole minutes, never h/m ("↦ 68 min", not "↦ 1h08m").
+            note = f"↦ {lead_min} min"
         for i, r in enumerate(hourly_rows[:NEAR_TERM_HOURS]):
             hour_start = r["time"]
             hour_end = hour_start + timedelta(hours=1)
@@ -1086,7 +1096,7 @@ def current_conditions_line(nowcast: dict | None, hourly_rows: list[dict]) -> Te
     if nowcast and nowcast.get("snapshot"):
         s = nowcast["snapshot"]
         if s.get("air_temperature") is not None:
-            parts.append(f"🌡️ {s['air_temperature']:.1f}°C")
+            parts.append(f"🌡️ {common.signed_temp(s['air_temperature'], 1).strip()}°C")
         if s.get("precipitation_rate") is not None:
             parts.append(f"💧 {s['precipitation_rate']:.1f} mm/h")
         if s.get("wind_speed") is not None:
@@ -1097,7 +1107,7 @@ def current_conditions_line(nowcast: dict | None, hourly_rows: list[dict]) -> Te
     elif hourly_rows:
         r = hourly_rows[0]
         if r.get("temp") is not None:
-            parts.append(f"🌡️ {common.round_half_up(r['temp'])}°C")
+            parts.append(f"🌡️ {common.signed_temp(common.round_half_up(r['temp'])).strip()}°C")
         if r.get("wind_speed") is not None:
             arrow = common.wind_arrow(r["wind_dir"]) if r.get("wind_dir") is not None else ""
             parts.append(f"💨 {r['wind_speed']:.0f} m/s {arrow}".strip())

@@ -327,6 +327,46 @@ def round_half_up(x: float) -> int:
     return int(x + (0.5 if x >= 0 else -0.5))
 
 
+def signed_temp(value: float, decimals: int = 0) -> str:
+    """A temperature with a one-character sign slot: "-" below zero, a
+    space otherwise (" 1", "-5", " 2.7", " 0") -- no "+" on positive values.
+    Every value so has the same sign-slot width and a column of them lines
+    up. Anything that displays as zero is never "-0.0". The one formatter
+    for every temperature shown; inline (non-column) text strips the space."""
+    text = f"{value: .{decimals}f}"
+    return " " + text[1:] if float(text) == 0 else text
+
+
+def precip_word(symbol_codes: list[str | None], temps: list[float | None]) -> str:
+    """ "Rain", "Snow" or "Rain/Snow": what the precipitation in a table is
+    expected to be, for its column headers.
+
+    Decided by MET's own symbol codes for the period shown: "Snow" if only
+    snow-type codes occur ("snow", "lightsnowshowers_day", ...), "Rain" if
+    only rain-type ones ("rain", "heavyrainshowers_night", ...), "Rain/Snow"
+    if both do. Sleet is itself a mix of the two, so any sleet code alone
+    already means "Rain/Snow". Only when the period has no precipitation code
+    at all (a dry table) is there nothing from MET to go by; the header then
+    follows the mean temperature -- "Snow" at or below 0 °C, else "Rain" --
+    purely so a dry, freezing table doesn't talk about rain."""
+    codes = [c.lower() for c in symbol_codes if c]
+    sleet = any("sleet" in c for c in codes)
+    snow = sleet or any("snow" in c for c in codes)
+    rain = sleet or any("rain" in c for c in codes)
+    if snow and rain:
+        return "Rain/Snow"
+    if snow or rain:
+        return "Snow" if snow else "Rain"
+    known = [t for t in temps if t is not None]
+    return "Snow" if known and sum(known) / len(known) <= 0 else "Rain"
+
+
+def precip_icon(word: str) -> str:
+    """Header icon for a precip_word() result: umbrella, snowflake, or the
+    sleet cloud for the "Rain/Snow" mix."""
+    return {"Rain": "☔", "Snow": "❄️"}.get(word, "🌨️")
+
+
 def wind_arrow(from_deg: float) -> str:
     """Compass arrow pointing in the direction the wind blows TOWARD."""
     to_deg = (from_deg + 180.0) % 360.0
